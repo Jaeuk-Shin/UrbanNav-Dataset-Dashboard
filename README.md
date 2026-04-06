@@ -50,7 +50,7 @@ dashboard/
                                                                     │
                                     VISUALIZERS[viz_type]           │
                                                                     ▼
-                                                             ┌────────���────┐
+                                                             ┌─────────────┐
                                                              │ Visualizer  │
                                                              │  function   │
                                                              └─────────────┘
