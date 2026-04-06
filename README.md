@@ -10,8 +10,38 @@ requires **one new file** and **one line** in the corresponding registry.
 ```bash
 pip install streamlit plotly opencv-python numpy pandas Pillow
 cd /raid/robot/real_world_dataset/omr
-streamlit run dashboard.py
+streamlit run dashboard.py -- --data-root /path/to/dataset
 ```
+
+The `--data-root` flag is optional; it defaults to
+`/raid/robot/real_world_dataset/omr/dataset`.  The `--` separates Streamlit
+flags from script arguments.
+
+### Remote / headless access
+
+When the dashboard runs on a remote server (e.g. accessed via SSH or VS Code
+Remote-SSH), start it in headless mode so it doesn't try to open a local
+browser:
+
+```bash
+# On the remote machine
+streamlit run dashboard.py --server.port 8501 --server.headless true \
+    -- --data-root /path/to/dataset
+```
+
+Then forward the port to your local machine:
+
+```bash
+# On your laptop (new terminal)
+ssh -N -L 8501:localhost:8501 user@remote-host
+```
+
+Open `http://localhost:8501` in your local browser.
+
+**VS Code Remote-SSH** users can skip the manual tunnel -- VS Code
+auto-forwards ports.  Just run the `streamlit run` command in the VS Code
+integrated terminal; the **Ports** panel (bottom bar) will show port 8501 and
+offer a link to open it.
 
 ## Package layout
 
