@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
-from ..types import QueryOutput
+from types import QueryOutput
 
 
 def vis_trajectory(output: QueryOutput, root: Path, max_n: int):

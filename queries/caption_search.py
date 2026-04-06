@@ -2,9 +2,9 @@
 
 import streamlit as st
 
-from ..query import Query
-from ..types import QueryOutput, FrameResult
-from ..loaders import load_json
+from query import Query
+from types import QueryOutput, FrameResult
+from loaders import load_json
 
 
 class CaptionSearchQuery(Query):

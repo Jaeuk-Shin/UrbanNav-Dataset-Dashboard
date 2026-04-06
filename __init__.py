@@ -18,5 +18,5 @@ Extension:
     - New viz:    add a file in visualizers/, import + register in visualizers/__init__.py
 """
 
-from .types import FrameResult, SegmentResult, QueryOutput
-from .query import Query
+from types import FrameResult, SegmentResult, QueryOutput
+from query import Query

@@ -3,9 +3,9 @@
 import numpy as np
 import streamlit as st
 
-from ..query import Query
-from ..types import QueryOutput, SegmentResult
-from ..loaders import load_poses, DATASET_FPS
+from query import Query
+from types import QueryOutput, SegmentResult
+from loaders import load_poses, DATASET_FPS
 
 
 class EgoVelocityQuery(Query):

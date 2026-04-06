@@ -5,10 +5,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from .loaders import list_segments
-from .queries import QUERIES
-from .visualizers import VISUALIZERS
-from .visualizers.table import vis_table
+from loaders import list_segments
+from queries import QUERIES
+from visualizers import VISUALIZERS
+from visualizers.table import vis_table
 
 
 def main(data_root: str | None = None):

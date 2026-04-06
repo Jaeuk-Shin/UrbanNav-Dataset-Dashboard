@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 import streamlit as st
 
-from ..types import QueryOutput
-from ._common import PALETTE, load_rgb
+from types import QueryOutput
+from visualizers._common import PALETTE, load_rgb
 
 
 def vis_mask(output: QueryOutput, root: Path, max_n: int):

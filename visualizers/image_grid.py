@@ -4,8 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from ..types import QueryOutput
-from ._common import load_rgb
+from types import QueryOutput
+from visualizers._common import load_rgb
 
 
 def vis_image_grid(output: QueryOutput, root: Path, max_n: int):
