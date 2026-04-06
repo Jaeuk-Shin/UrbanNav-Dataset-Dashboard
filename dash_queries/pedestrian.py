@@ -2,9 +2,9 @@
 
 import streamlit as st
 
-from query import Query
-from types import QueryOutput, FrameResult
-from loaders import load_json
+from dash_query import Query
+from dash_types import QueryOutput, FrameResult
+from dash_loaders import load_json
 
 
 class PedestrianCountQuery(Query):
@@ -26,6 +26,7 @@ class PedestrianCountQuery(Query):
             if not f.exists():
                 continue
             for fid, d in load_json(str(f)).items():
+                print('go!')
                 good = [
                     p for p in d["pedestrians"]
                     if p["confidence"] >= params["min_conf"]

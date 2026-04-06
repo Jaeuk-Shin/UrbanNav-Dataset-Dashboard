@@ -2,9 +2,9 @@
 
 import numpy as np
 
-from ..query import Query
-from ..types import QueryOutput, SegmentResult
-from ..loaders import load_json, load_poses, DATASET_FPS
+from dash_query import Query
+from dash_types import QueryOutput, SegmentResult
+from dash_loaders import load_json, load_poses, DATASET_FPS
 
 
 class DatasetOverview(Query):

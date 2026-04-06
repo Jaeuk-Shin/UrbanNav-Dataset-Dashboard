@@ -7,11 +7,11 @@ To add a new visualizer, create a module here and register its function in
     def vis_xxx(output: QueryOutput, root: Path, max_n: int) -> None
 """
 
-from visualizers.image_grid import vis_image_grid
-from visualizers.detection import vis_detection
-from visualizers.mask import vis_mask
-from visualizers.trajectory import vis_trajectory
-from visualizers.table import vis_table
+from dash_visualizers.image_grid import vis_image_grid
+from dash_visualizers.detection import vis_detection
+from dash_visualizers.mask import vis_mask
+from dash_visualizers.trajectory import vis_trajectory
+from dash_visualizers.table import vis_table
 
 VISUALIZERS = {
     "image_grid": vis_image_grid,

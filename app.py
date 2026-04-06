@@ -5,10 +5,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from loaders import list_segments
-from queries import QUERIES
-from visualizers import VISUALIZERS
-from visualizers.table import vis_table
+from dash_loaders import list_segments
+from dash_queries import QUERIES
+from dash_visualizers import VISUALIZERS
+from dash_visualizers.table import vis_table
 
 
 def main(data_root: str | None = None):
@@ -16,7 +16,7 @@ def main(data_root: str | None = None):
     st.title("UrbanNav Dataset Explorer")
 
     # ── Sidebar: data root + segment filter ──────────────────────────────────
-    default_root = data_root or "/raid/robot/real_world_dataset/omr/dataset"
+    default_root = data_root or "/home3/rvl/dataset/youtube_videos"
     root = Path(st.sidebar.text_input("Dataset root", default_root))
     if not (root / "rgb").is_dir():
         st.error(f"`{root}/rgb` not found. Check the dataset root path.")
