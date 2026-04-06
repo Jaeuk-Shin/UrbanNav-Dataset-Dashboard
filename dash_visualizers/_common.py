@@ -13,9 +13,28 @@ PALETTE = [
 
 
 def load_rgb(root: Path, seg: str, fid: str):
-    """Load an RGB frame as (H, W, 3) uint8 array, or *None*."""
+    """Load an RGB frame as (H, W, 3) uint8 array, or *None*.
+
+    Tries the frame-directory layout first (``rgb/{seg}/{fid}.jpg``),
+    then falls back to extracting the frame from a video file
+    (``rgb/{seg}.mp4``) using the frame index encoded in *fid*.
+    """
+    # Frame-directory layout
     p = root / "rgb" / seg / f"{fid}.jpg"
-    if not p.exists():
+    if p.exists():
+        img = cv2.imread(str(p))
+        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if img is not None else None
+
+    # Video-file layout
+    vid = root / "rgb" / f"{seg}.mp4"
+    if not vid.exists():
         return None
-    img = cv2.imread(str(p))
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if img is not None else None
+    cap = cv2.VideoCapture(str(vid))
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fid))
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    finally:
+        cap.release()

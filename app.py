@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from dash_loaders import list_segments
+from dash_loaders import list_segments, load_segment_cache
 from dash_queries import QUERIES
 from dash_visualizers import VISUALIZERS
 from dash_visualizers.table import vis_table
@@ -18,11 +18,12 @@ def main(data_root: str | None = None):
     # ── Sidebar: data root + segment filter ──────────────────────────────────
     default_root = data_root or "/home3/rvl/dataset/youtube_videos"
     root = Path(st.sidebar.text_input("Dataset root", default_root))
-    if not (root / "rgb").is_dir():
+    has_cache = load_segment_cache(str(root)) is not None
+    if not has_cache and not (root / "rgb").is_dir():
         st.error(f"`{root}/rgb` not found. Check the dataset root path.")
         return
 
-    segs = list_segments(str(root / "rgb"))
+    segs = list_segments(str(root))
     pat = st.sidebar.text_input("Segment filter (glob)", "*")
     filtered = [s for s in segs if fnmatch(s, pat)]
     st.sidebar.caption(f"{len(filtered)} / {len(segs)} segments")

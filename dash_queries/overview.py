@@ -1,10 +1,11 @@
 """Per-segment summary table query."""
 
+import cv2
 import numpy as np
 
 from dash_query import Query
 from dash_types import QueryOutput, SegmentResult
-from dash_loaders import load_json, load_poses, DATASET_FPS
+from dash_loaders import load_json, load_poses, segment_frame_count, DATASET_FPS
 
 
 class DatasetOverview(Query):
@@ -18,9 +19,18 @@ class DatasetOverview(Query):
         rows = []
         for seg in segments:
             r = {"segment": seg, "date": "-".join(seg.split("-")[:3])}
-            rgb = root / "rgb" / seg
-            if rgb.exists():
-                r["frames"] = len(list(rgb.glob("*.jpg")))
+            cached_count = segment_frame_count(str(root), seg)
+            if cached_count is not None:
+                r["frames"] = cached_count
+            else:
+                rgb_dir = root / "rgb" / seg
+                rgb_vid = root / "rgb" / f"{seg}.mp4"
+                if rgb_dir.is_dir():
+                    r["frames"] = len(list(rgb_dir.glob("*.jpg")))
+                elif rgb_vid.is_file():
+                    cap = cv2.VideoCapture(str(rgb_vid))
+                    r["frames"] = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    cap.release()
             df = root / "annotations" / seg / "detections.json"
             if df.exists():
                 dets = load_json(str(df))
