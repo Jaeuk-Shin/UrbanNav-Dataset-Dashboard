@@ -11,13 +11,13 @@ from .visualizers import VISUALIZERS
 from .visualizers.table import vis_table
 
 
-def main():
-    st.set_page_config(page_title="OMR Dataset Explorer", layout="wide")
-    st.title("OMR Dataset Explorer")
+def main(data_root: str | None = None):
+    st.set_page_config(page_title="UrbanNav Dataset Explorer", layout="wide")
+    st.title("UrbanNav Dataset Explorer")
 
     # ── Sidebar: data root + segment filter ──────────────────────────────────
-    root = Path(st.sidebar.text_input(
-        "Dataset root", "/raid/robot/real_world_dataset/omr/dataset"))
+    default_root = data_root or "/raid/robot/real_world_dataset/omr/dataset"
+    root = Path(st.sidebar.text_input("Dataset root", default_root))
     if not (root / "rgb").is_dir():
         st.error(f"`{root}/rgb` not found. Check the dataset root path.")
         return
