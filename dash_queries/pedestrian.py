@@ -26,7 +26,6 @@ class PedestrianCountQuery(Query):
             if not f.exists():
                 continue
             for fid, d in load_json(str(f)).items():
-                print('go!')
                 good = [
                     p for p in d["pedestrians"]
                     if p["confidence"] >= params["min_conf"]

@@ -1,11 +1,39 @@
-# OMR Dataset Explorer Dashboard
+# OMR Dataset Toolkit
 
-A plugin-based Streamlit dashboard for exploring the OMR outdoor mobile robot
-dataset.  Queries filter data; visualizers render the results.  Both are
-independent extension points -- adding a new query or a new visualization
-requires **one new file** and **one line** in the corresponding registry.
+Two-part toolkit for the OMR outdoor mobile robot dataset:
+
+1. **Annotation pipeline** (`annotate.py`) — GPU-accelerated annotation
+   generation: pedestrian detection (YOLOv8), captioning (Florence-2),
+   segmentation (Grounding DINO + SAM2), embeddings (SigLIP), and crosswalk
+   detection.  Multi-GPU support.
+2. **Explorer dashboard** (`app.py`) — plugin-based Streamlit dashboard for
+   browsing annotated data.  Queries filter data; visualizers render results.
 
 ## Quickstart
+
+### Annotation pipeline
+
+```bash
+# Install annotation dependencies
+pip install torch torchvision ultralytics transformers open-clip-torch \
+    tqdm numpy opencv-python Pillow scikit-image
+pip install SAM-2  # optional, falls back to SAM ViT-Huge
+
+# Run all stages on the dataset
+python annotate.py all --data-root /path/to/dataset --num-gpus 4
+
+# Run individual stages
+python annotate.py detect --data-root /path/to/dataset
+python annotate.py caption --data-root /path/to/dataset
+
+# Text-based image retrieval (requires embeddings)
+python annotate.py query "person crossing street" --top-k 20
+
+# Video dataset
+python annotate.py all --data-root video_dataset --input-format video --fps 0.2
+```
+
+### Explorer dashboard
 
 ```bash
 pip install streamlit plotly opencv-python numpy pandas Pillow
@@ -25,7 +53,7 @@ browser:
 
 ```bash
 # On the remote machine
-streamlit run dashboard.py --server.port 8501 --server.headless true \
+streamlit run __main__.py --server.port 8501 --server.headless true \
     -- --data-root /path/to/dataset
 ```
 
@@ -46,31 +74,76 @@ offer a link to open it.
 ## Package layout
 
 ```
-dashboard.py                        # entry point (streamlit run dashboard.py)
-dashboard/
-    __init__.py                     # re-exports Query, FrameResult, SegmentResult, QueryOutput
-    types.py                        # result dataclasses
-    query.py                        # Query abstract base class
-    loaders.py                      # cached helpers: load_json, load_poses, list_segments
-    app.py                          # Streamlit main()
-    queries/
-        __init__.py                 # QUERIES registry (list)
-        overview.py                 # DatasetOverview
-        pedestrian.py               # PedestrianCountQuery
-        object_presence.py          # ObjectPresenceQuery
-        ego_velocity.py             # EgoVelocityQuery
-        caption_search.py           # CaptionSearchQuery
-    visualizers/
-        __init__.py                 # VISUALIZERS registry (dict)
-        _common.py                  # PALETTE, load_rgb()
-        image_grid.py               # vis_image_grid
-        detection.py                # vis_detection
-        mask.py                     # vis_mask
-        trajectory.py               # vis_trajectory
-        table.py                    # vis_table
+annotate.py                         # annotation pipeline CLI entry point
+core/
+    discovery.py                    # segment discovery with caching
+    frames.py                       # FrameRef, SegmentReader, prefetch helpers
+    parallel.py                     # multi-GPU parallel runner
+stages/
+    __init__.py                     # auto-discovery registry
+    base.py                         # BaseStage abstract class, STAGES dict
+    detect.py                       # YOLOv8 pedestrian detection
+    embed.py                        # SigLIP image embeddings
+    caption.py                      # Florence-2 captioning + tags
+    segment.py                      # Grounding DINO + SAM2 segmentation
+    crosswalk.py                    # Grounding DINO crosswalk detection
+    query.py                        # text-based image retrieval
+
+dashboard.py                        # dashboard entry point (streamlit run dashboard.py)
+app.py                              # Streamlit main()
+dash_types.py                       # result dataclasses
+dash_query.py                       # Query abstract base class
+dash_loaders.py                     # cached helpers: load_json, load_poses, list_segments
+dash_queries/
+    __init__.py                     # QUERIES registry (list)
+    overview.py                     # DatasetOverview
+    pedestrian.py                   # PedestrianCountQuery
+    object_presence.py              # ObjectPresenceQuery
+    ego_velocity.py                 # EgoVelocityQuery
+    caption_search.py               # CaptionSearchQuery
+dash_visualizers/
+    __init__.py                     # VISUALIZERS registry (dict)
+    _common.py                      # PALETTE, load_rgb()
+    image_grid.py                   # vis_image_grid
+    detection.py                    # vis_detection
+    mask.py                         # vis_mask
+    trajectory.py                   # vis_trajectory
+    table.py                        # vis_table
 ```
 
-## Architecture
+## Annotation pipeline
+
+### Stages
+
+| Stage       | Model                          | Output                                    |
+|-------------|--------------------------------|-------------------------------------------|
+| `embed`     | SigLIP ViT-SO400M-14-SigLIP-384 | `embeddings.npy` (float16 vectors)      |
+| `detect`    | YOLOv8x                        | `detections.json` (bboxes + counts)       |
+| `caption`   | Florence-2-large               | `captions.json` (descriptions + tags)     |
+| `segment`   | Grounding DINO + SAM2          | `masks/*.png` + `masks/*.json`            |
+| `crosswalk` | Grounding DINO                 | `crosswalks.json` (bbox detections)       |
+| `query`     | SigLIP (text encoder)          | text-based image retrieval (interactive)  |
+| `all`       | —                              | runs embed → detect → caption → segment   |
+
+### Stage plugin architecture
+
+Stages auto-register via `__init_subclass__`:
+
+```python
+class MyStage(BaseStage):
+    name = "my_stage"
+    default_batch_size = 32
+
+    def load_model(self, device, args): ...
+    def process_segment(self, seg_name, paths, reader, out_dir, args, pbar): ...
+    def should_skip(self, out_dir, args): ...  # optional
+```
+
+The `BaseStage.run()` template handles discovery, prefetching, progress bars,
+and skip logic.  Multi-GPU parallelism splits segments across GPUs via
+`core/parallel.py`.
+
+## Dashboard architecture
 
 ```
 ┌──────────┐   build_params()   ┌────────────┐   execute()   ┌─────────────┐

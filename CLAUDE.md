@@ -4,9 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Streamlit dashboard for exploring the OMR outdoor mobile robot dataset. Plugin-based architecture: **queries** filter data, **visualizers** render results. Both are independent extension points.
+Two-part toolkit for the OMR outdoor mobile robot dataset:
+
+1. **Annotation pipeline** (`annotate.py`) — generates annotations (detection, captioning, segmentation, embeddings) using GPU-accelerated models.
+2. **Dashboard** (`app.py`) — Streamlit UI for exploring the annotated dataset. Plugin-based: **queries** filter data, **visualizers** render results.
 
 ## Running
+
+### Annotation pipeline
+
+```bash
+python annotate.py <command> [options]
+```
+
+Commands: `embed`, `detect`, `caption`, `segment`, `crosswalk`, `query`, `all`.
+Common flags: `--data-root` (default: `dataset`), `--num-gpus`, `--input-format` (`jpg`|`video`), `--fps`, `--subsample`, `--overwrite`.
+
+Dependencies: `torch torchvision ultralytics transformers open-clip-torch tqdm numpy opencv-python Pillow scikit-image`
+Optional: `sam2` (falls back to SAM ViT-Huge if missing)
+
+### Dashboard
 
 ```bash
 cd /raid/robot/real_world_dataset/omr
@@ -18,6 +35,20 @@ Dependencies: `streamlit plotly opencv-python numpy pandas Pillow`
 The entry point is `dashboard.py` (parent directory), which calls `dashboard/app.py:main()`. The default dataset root is `/raid/robot/real_world_dataset/omr/dataset`.
 
 ## Architecture
+
+### Annotation pipeline
+
+Auto-discovered stage system in `stages/`:
+
+- `stages/base.py` — `BaseStage` abstract class and `STAGES` registry dict. Subclasses auto-register via `__init_subclass__`.
+- `stages/__init__.py` — auto-imports all modules to trigger registration.
+- `core/discovery.py` — segment discovery with caching (`.segment_cache.pkl`).
+- `core/frames.py` — `FrameRef` / `SegmentReader` / `PreloadedReader` for reading JPG dirs or MP4 videos.
+- `core/parallel.py` — multi-GPU orchestration via `multiprocessing.spawn`.
+
+Adding a new stage: create `stages/my_stage.py`, subclass `BaseStage`, set `name = "my_stage"`, implement `load_model()` and `process_segment()`. It auto-registers.
+
+### Dashboard
 
 Query-visualizer pipeline, fully decoupled:
 
