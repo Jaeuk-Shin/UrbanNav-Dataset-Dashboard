@@ -1,16 +1,4 @@
-"""Clip + trajectory playback for thumbnail visualizers.
-
-The dataset uses per-segment ``.mp4`` files at native (~30 fps) indexing, so
-we reuse them directly: ``st.video(path, start_time=s, end_time=e)`` tells
-the browser which range to play via HTTP Range requests — no clip encoding.
-
-Alongside the clip we render a 3D trajectory (pose BLOB from the curation
-DB) with the clicked frame highlighted.  Two render modes:
-
-* **Triads** (Plotly) — RGB orientation triad at every pose in the window.
-* **Textured planes** (Three.js) — N camera quads sampled along the window,
-  each textured with the corresponding MP4 frame and oriented by the
-  camera quaternion.  Useful for seeing what the camera was looking at.
+"""3D trajectory rendering: Plotly orientation triads + Three.js textured planes.
 
 Pose convention: DPVO/OpenCV — x right, y DOWN, z forward.
 ``Rot.from_quat([qx,qy,qz,qw]).as_matrix()`` returns a proper right-handed
@@ -20,91 +8,17 @@ world coords.
 
 from __future__ import annotations
 
-import base64
 import json
-import os
-from pathlib import Path
 
-import cv2
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from scipy.spatial.transform import Rotation as Rot
 
-from curation.database import get_connection
+from ._video_io import _frame_jpeg_b64, _video_aspect
 
-VIDEO_FPS = 30.0
-CLIP_DURATION_SEC = 5.0
 N_TEXTURED_PLANES = 5
-TEXTURE_MAX_WIDTH = 320
-
-
-def play_button(idx: int, segment: str, frame_id: str,
-                namespace: str = "play") -> None:
-    """Render a ``▶ Play 5s`` button; selection is stashed in session state."""
-    if st.button("▶ Play 5s", key=f"{namespace}_{idx}_{segment}_{frame_id}",
-                 use_container_width=True):
-        st.session_state["_clip"] = (segment, frame_id)
-
-
-@st.cache_data(show_spinner=False)
-def _video_frame_count(mp4_path: str) -> int | None:
-    cap = cv2.VideoCapture(mp4_path)
-    try:
-        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        return n if n > 0 else None
-    finally:
-        cap.release()
-
-
-@st.cache_data(show_spinner=False)
-def _video_aspect(mp4_path: str) -> float:
-    cap = cv2.VideoCapture(mp4_path)
-    try:
-        w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-        h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        return float(w) / float(h) if w > 0 and h > 0 else 16.0 / 9.0
-    finally:
-        cap.release()
-
-
-@st.cache_data(show_spinner=False)
-def _load_pose(db_path: str, seg: str, _mtime: float) -> np.ndarray | None:
-    """Load (N, 7) pose (x y z qx qy qz qw) from segment_poses for *seg*."""
-    conn = get_connection(db_path, readonly=True)
-    row = conn.execute(
-        """SELECT sp.pose_data FROM segment_poses sp
-           JOIN segments s ON sp.segment_id = s.segment_id
-           WHERE s.name = ?""",
-        (seg,),
-    ).fetchone()
-    conn.close()
-    if row is None or row["pose_data"] is None:
-        return None
-    return np.frombuffer(row["pose_data"], dtype=np.float64).reshape(-1, 7)
-
-
-@st.cache_data(show_spinner=False)
-def _frame_jpeg_b64(mp4_path: str, vid_idx: int,
-                     max_w: int = TEXTURE_MAX_WIDTH) -> str | None:
-    """Extract one MP4 frame, return base64-encoded JPEG (no data URI prefix)."""
-    cap = cv2.VideoCapture(mp4_path)
-    try:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(vid_idx)))
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            return None
-        h, w = frame.shape[:2]
-        if w > max_w:
-            scale = max_w / w
-            frame = cv2.resize(frame, (max_w, int(h * scale)))
-        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        if not ok:
-            return None
-        return base64.b64encode(buf.tobytes()).decode("ascii")
-    finally:
-        cap.release()
 
 
 def _axis_segments(origins: np.ndarray, ends: np.ndarray
@@ -383,79 +297,3 @@ def _render_textured_planes(pose: np.ndarray, pose_idx: int,
             .replace("__DATA__", payload)
             .replace("__HEIGHT__", str(height)))
     components.html(html, height=height + 10)
-
-
-def _video_frame_to_pose_idx(vid_frame: int, n_pose: int,
-                             n_video: int | None) -> int:
-    """Map video frame index (native fps) to pose row index."""
-    if n_video and n_video > 0:
-        return min(int(vid_frame * n_pose / n_video), n_pose - 1)
-    return min(vid_frame // 6, n_pose - 1)
-
-
-def show_selected_clip(root: Path,
-                       duration: float = CLIP_DURATION_SEC) -> None:
-    """Render the clicked clip + trajectory at the top of the results view."""
-    clip = st.session_state.get("_clip")
-    if not clip:
-        return
-    seg, fid = clip
-
-    vid = root / "rgb" / f"{seg}.mp4"
-    if not vid.exists():
-        st.warning(f"No MP4 found for segment: {seg}")
-        return
-    try:
-        fi = int(fid)
-    except ValueError:
-        return
-
-    center = fi / VIDEO_FPS
-    start = max(0.0, center - duration / 2)
-    end = center + duration / 2
-
-    st.markdown(f"**Clip** — `{seg}` @ frame {fi} ({center:.1f}s)")
-
-    vid_col, traj_col = st.columns([1, 1])
-    with vid_col:
-        st.video(str(vid), start_time=int(start), end_time=int(end),
-                 autoplay=True, muted=True)
-
-    with traj_col:
-        mode = st.selectbox(
-            "Trajectory view",
-            ["Triads (Plotly)", "Textured planes (Three.js)"],
-            key="_clip_traj_mode",
-            index=0,
-        )
-        db_path = st.session_state.get("_clip_db_path", "")
-        if db_path and Path(db_path).exists():
-            pose = _load_pose(db_path, seg, os.path.getmtime(db_path))
-            if pose is not None and len(pose) > 0:
-                n_video = _video_frame_count(str(vid))
-                pose_idx = _video_frame_to_pose_idx(fi, len(pose), n_video)
-                if n_video and n_video > 0:
-                    ratio = len(pose) / n_video
-                else:
-                    ratio = 1.0 / 6.0
-                window_half = max(3, int(round(duration * 0.5
-                                                * VIDEO_FPS * ratio)))
-                if mode.startswith("Triads"):
-                    _render_triads(pose, pose_idx,
-                                    window_half=window_half, height=420)
-                else:
-                    _render_textured_planes(
-                        pose, pose_idx,
-                        window_half=window_half, height=420,
-                        mp4_path=str(vid), n_video=n_video,
-                    )
-            else:
-                st.caption("(No pose data in DB for this segment)")
-        else:
-            st.caption("(Set the Curation DB path in the sidebar "
-                       "to see trajectories)")
-
-    if st.button("✕ Close clip", key="_clip_close"):
-        del st.session_state["_clip"]
-        st.rerun()
-    st.divider()

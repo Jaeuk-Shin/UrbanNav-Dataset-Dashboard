@@ -208,78 +208,27 @@ class SegmentStage(BaseStage):
             if not sam_items:
                 continue
 
-            # SAM
+            # SAM dispatch — same per-item pipeline regardless of backend.
             _t2 = torch.cuda.Event(enable_timing=True)
             _t3 = torch.cuda.Event(enable_timing=True)
             _t2.record()
-            if self._use_sam2:
-                if self._sam2_batch and len(sam_items) > 1:
-                    # Batch image encoding + batch mask prediction
-                    with torch.autocast("cuda", dtype=torch.bfloat16):
-                        self.sam_predictor.set_image_batch(
-                            [np.array(it[1]) for it in sam_items]
-                        )
-                        masks_list, _, _ = self.sam_predictor.predict_batch(
-                            box_batch=[
-                                it[2].cpu().numpy() for it in sam_items
-                            ],
-                            multimask_output=False,
-                        )
-                    for item, pred_masks in zip(sam_items, masks_list):
-                        ref, img, boxes, labels, scores, h, w = item
-                        label_map, meta = _compose_label_map(
-                            pred_masks, boxes, labels, scores, h, w
-                        )
-                        io_futures.append(self._io_pool.submit(
-                            _write_mask, mask_dir, ref.stem, label_map, meta
-                        ))
-                        summary[ref.stem] = len(meta)
-                        pbar.update(1)
-                else:
-                    # Per-image SAM2
-                    for ref, img, boxes, labels, scores, h, w in sam_items:
-                        with torch.autocast("cuda", dtype=torch.bfloat16):
-                            self.sam_predictor.set_image(np.array(img))
-                            pred_masks, _, _ = self.sam_predictor.predict(
-                                box=boxes.cpu().numpy(),
-                                multimask_output=False,
-                            )
-                        label_map, meta = _compose_label_map(
-                            pred_masks, boxes, labels, scores, h, w
-                        )
-                        io_futures.append(self._io_pool.submit(
-                            _write_mask, mask_dir, ref.stem, label_map, meta
-                        ))
-                        summary[ref.stem] = len(meta)
-                        pbar.update(1)
+            if self._use_sam2 and self._sam2_batch and len(sam_items) > 1:
+                pred_list = self._run_sam2_batch(sam_items)
+            elif self._use_sam2:
+                pred_list = self._run_sam2_per_image(sam_items)
             else:
-                # SAM1 fallback (no sam2 package)
-                for ref, img, boxes, labels, scores, h, w in sam_items:
-                    input_boxes = [boxes.cpu().tolist()]
-                    sam_in = self.sam_proc(
-                        img, input_boxes=input_boxes, return_tensors="pt"
-                    ).to(self.device)
-                    with torch.no_grad():
-                        sam_out = self.sam_model(**sam_in)
-                    pred_masks_t = self.sam_proc.image_processor.post_process_masks(
-                        sam_out.pred_masks.cpu(),
-                        sam_in["original_sizes"].cpu(),
-                        sam_in["reshaped_input_sizes"].cpu(),
-                    )[0]
-                    iou_t = sam_out.iou_scores.cpu()[0]
-                    best = iou_t.argmax(dim=-1)
-                    pred_masks = np.stack([
-                        pred_masks_t[j, best[j].item()].numpy() > 0.5
-                        for j in range(len(boxes))
-                    ])
-                    label_map, meta = _compose_label_map(
-                        pred_masks, boxes, labels, scores, h, w
-                    )
-                    io_futures.append(self._io_pool.submit(
-                        _write_mask, mask_dir, ref.stem, label_map, meta
-                    ))
-                    summary[ref.stem] = len(meta)
-                    pbar.update(1)
+                pred_list = self._run_sam1_fallback(sam_items)
+
+            for item, pred_masks in zip(sam_items, pred_list):
+                ref, _, boxes, labels, scores, h, w = item
+                label_map, meta = _compose_label_map(
+                    pred_masks, boxes, labels, scores, h, w
+                )
+                io_futures.append(self._io_pool.submit(
+                    _write_mask, mask_dir, ref.stem, label_map, meta
+                ))
+                summary[ref.stem] = len(meta)
+                pbar.update(1)
 
             _t3.record()
             torch.cuda.synchronize()
@@ -296,6 +245,52 @@ class SegmentStage(BaseStage):
             f.result()
 
         (out_dir / "masks_done.json").write_text(json.dumps(summary))
+
+    def _run_sam2_batch(self, sam_items):
+        """Batched SAM2 image encoding + mask prediction."""
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            self.sam_predictor.set_image_batch(
+                [np.array(it[1]) for it in sam_items]
+            )
+            masks_list, _, _ = self.sam_predictor.predict_batch(
+                box_batch=[it[2].cpu().numpy() for it in sam_items],
+                multimask_output=False,
+            )
+        return list(masks_list)
+
+    def _run_sam2_per_image(self, sam_items):
+        """Per-image SAM2 (used when batched API is unavailable / single item)."""
+        out = []
+        for _, img, boxes, *_ in sam_items:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                self.sam_predictor.set_image(np.array(img))
+                pred_masks, _, _ = self.sam_predictor.predict(
+                    box=boxes.cpu().numpy(), multimask_output=False,
+                )
+            out.append(pred_masks)
+        return out
+
+    def _run_sam1_fallback(self, sam_items):
+        """SAM ViT-Huge fallback — only used when ``sam2`` isn't installed."""
+        out = []
+        for _, img, boxes, *_ in sam_items:
+            sam_in = self.sam_proc(
+                img, input_boxes=[boxes.cpu().tolist()], return_tensors="pt",
+            ).to(self.device)
+            with torch.no_grad():
+                sam_out = self.sam_model(**sam_in)
+            pred_masks_t = self.sam_proc.image_processor.post_process_masks(
+                sam_out.pred_masks.cpu(),
+                sam_in["original_sizes"].cpu(),
+                sam_in["reshaped_input_sizes"].cpu(),
+            )[0]
+            best = sam_out.iou_scores.cpu()[0].argmax(dim=-1)
+            pred_masks = np.stack([
+                pred_masks_t[j, best[j].item()].numpy() > 0.5
+                for j in range(len(boxes))
+            ])
+            out.append(pred_masks)
+        return out
 
     def on_complete(self, out_root, args):
         self._io_pool.shutdown()

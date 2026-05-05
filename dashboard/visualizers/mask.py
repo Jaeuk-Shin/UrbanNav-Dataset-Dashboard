@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import streamlit as st
 
-from ..clip import play_button, show_selected_clip
+from ..clip_playback import play_button, show_selected_clip
 from ..types import QueryOutput
 from ._common import PALETTE, load_rgb
 

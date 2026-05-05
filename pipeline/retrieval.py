@@ -12,6 +12,55 @@ from pipeline.discovery import discover_segments
 from pipeline.frames import load_frame
 
 
+def _save_mask_overlay(img, ann_root, seg, frame, save_dir, rank) -> bool:
+    """Blend the SAM label map for ``(seg, frame)`` over *img* and write JPEG.
+
+    Returns True iff a mask file existed (regardless of whether it had labels).
+    """
+    mask_file = ann_root / seg / "masks" / f"{frame}.png"
+    if not mask_file.exists():
+        return False
+    label_map = np.array(Image.open(mask_file))
+    n_labels = int(label_map.max())
+    if n_labels > 0:
+        rng = np.random.RandomState(42)
+        pal = np.zeros((n_labels + 1, 3), dtype=np.uint8)
+        pal[1:] = rng.randint(60, 255, size=(n_labels, 3))
+        blended = Image.blend(img, Image.fromarray(pal[label_map]), alpha=0.4)
+    else:
+        blended = img
+    blended.save(save_dir / f"{rank:03d}_{seg}_{frame}_mask.jpg", quality=90)
+    return True
+
+
+def _save_detection_overlay(img, ann_root, seg, frame, save_dir, rank,
+                             font) -> bool:
+    """Draw pedestrian boxes for ``(seg, frame)`` over *img* and write JPEG."""
+    from PIL import ImageDraw
+
+    det_file = ann_root / seg / "detections.json"
+    if not det_file.exists():
+        return False
+    d = json.loads(det_file.read_text())
+    if frame not in d or d[frame]["pedestrian_count"] == 0:
+        return False
+
+    draw_img = img.copy()
+    draw = ImageDraw.Draw(draw_img)
+    for ped in d[frame]["pedestrians"]:
+        x1, y1, x2, y2 = ped["bbox"]
+        draw.rectangle([x1, y1, x2, y2], outline="lime", width=3)
+        lbl = f"{ped['confidence']:.2f}"
+        tx, ty = x1, y1 - 22
+        if ty < 0:
+            ty = y2 + 2
+        bb = draw.textbbox((tx, ty), lbl, font=font)
+        draw.rectangle(bb, fill="lime")
+        draw.text((tx, ty), lbl, fill="black", font=font)
+    draw_img.save(save_dir / f"{rank:03d}_{seg}_{frame}_det.jpg", quality=90)
+    return True
+
+
 def run_query(args):
     import open_clip
 
@@ -74,16 +123,15 @@ def run_query(args):
         vis_masks = getattr(args, "vis_masks", False)
         vis_det = getattr(args, "vis_detections", False)
 
-        # Load font once for detection overlays
-        _det_font = None
+        det_font = None
         if vis_det:
-            from PIL import ImageDraw, ImageFont
+            from PIL import ImageFont
             try:
-                _det_font = ImageFont.truetype(
+                det_font = ImageFont.truetype(
                     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18
                 )
             except OSError:
-                _det_font = ImageFont.load_default()
+                det_font = ImageFont.load_default()
 
         mask_count = 0
         det_count = 0
@@ -95,52 +143,20 @@ def run_query(args):
                 else:
                     load_frame(ref).save(dst)
 
-            # Lazy-load the image only when a visualisation is requested
-            img = None
-            if vis_masks or vis_det:
-                img = load_frame(ref)
-                if img is None:
-                    continue
+            if not (vis_masks or vis_det):
+                continue
+            img = load_frame(ref)
+            if img is None:
+                continue
 
-            if vis_masks:
-                mask_file = ann_root / seg / "masks" / f"{frame}.png"
-                if mask_file.exists():
-                    label_map = np.array(Image.open(mask_file))
-                    n_labels = int(label_map.max())
-                    if n_labels > 0:
-                        rng = np.random.RandomState(42)
-                        pal = np.zeros((n_labels + 1, 3), dtype=np.uint8)
-                        pal[1:] = rng.randint(60, 255, size=(n_labels, 3))
-                        mask_rgb = Image.fromarray(pal[label_map])
-                        blended = Image.blend(img, mask_rgb, alpha=0.4)
-                    else:
-                        blended = img
-                    vis_dst = save_dir / f"{rank:03d}_{seg}_{frame}_mask.jpg"
-                    blended.save(vis_dst, quality=90)
-                    mask_count += 1
-
-            if vis_det:
-                from PIL import ImageDraw, ImageFont
-                det_file = ann_root / seg / "detections.json"
-                if det_file.exists():
-                    d = json.loads(det_file.read_text())
-                    if frame in d and d[frame]["pedestrian_count"] > 0:
-                        draw_img = img.copy()
-                        draw = ImageDraw.Draw(draw_img)
-                        for ped in d[frame]["pedestrians"]:
-                            x1, y1, x2, y2 = ped["bbox"]
-                            conf = ped["confidence"]
-                            draw.rectangle([x1, y1, x2, y2], outline="lime", width=3)
-                            lbl = f"{conf:.2f}"
-                            tx, ty = x1, y1 - 22
-                            if ty < 0:
-                                ty = y2 + 2
-                            bb = draw.textbbox((tx, ty), lbl, font=_det_font)
-                            draw.rectangle(bb, fill="lime")
-                            draw.text((tx, ty), lbl, fill="black", font=_det_font)
-                        det_dst = save_dir / f"{rank:03d}_{seg}_{frame}_det.jpg"
-                        draw_img.save(det_dst, quality=90)
-                        det_count += 1
+            if vis_masks and _save_mask_overlay(
+                img, ann_root, seg, frame, save_dir, rank,
+            ):
+                mask_count += 1
+            if vis_det and _save_detection_overlay(
+                img, ann_root, seg, frame, save_dir, rank, det_font,
+            ):
+                det_count += 1
 
         parts = []
         if vis_masks and mask_count:

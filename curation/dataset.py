@@ -56,42 +56,45 @@ class FilteredFeatDataset(Dataset):
         self.pose_fps = cfg.data.pose_fps
         self.target_fps = cfg.data.target_fps
         self.input_noise = cfg.data.input_noise
-
         self.pose_step = max(1, self.pose_fps // self.target_fps)
         self.frame_step = self.video_fps // self.target_fps
 
-        # Load pre-built LUT
-        data = np.load(lut_path, allow_pickle=True)
-        self.lut = data["lut"]  # (M, 2) int32: (seg_local_idx, pose_start)
-        segment_names = data["segment_names"]  # (S,) object
-        segment_paths = data["segment_paths"]  # (S, 4) object
-        self.video_ranges = data["video_ranges"]  # (S, 2) int32
+        self._load_lut(lut_path)
+        self._load_metadata()
+        self._load_poses(db_path)
+        self._camera = self._parse_camera_intrinsics(cfg)
+        self._setup_augmentation()
+        self._feat_cache = {"idx": None, "data": None}
+        self._resolve_image_paths()
 
+    def _load_lut(self, lut_path: str) -> None:
+        data = np.load(lut_path, allow_pickle=True)
+        self.lut = data["lut"]                  # (M, 2) int32
+        self.video_ranges = data["video_ranges"]  # (S, 2) int32
         assert len(self.lut) > 0, f"LUT at {lut_path} is empty"
 
-        # Unpack segment paths
-        self.segment_names = list(segment_names)
-        self.pose_paths = [str(p[0]) for p in segment_paths]
-        self.feature_paths = [str(p[1]) for p in segment_paths]
-        self.rgb_paths = [str(p[2]) for p in segment_paths]
+        self.segment_names = list(data["segment_names"])
+        paths = data["segment_paths"]           # (S, 4) object
+        self.pose_paths = [str(p[0]) for p in paths]
+        self.feature_paths = [str(p[1]) for p in paths]
+        self.rgb_paths = [str(p[2]) for p in paths]
 
-        # Load metadata from feature directory
+    def _load_metadata(self) -> None:
+        """Read ``feature_dim`` / ``include_flip`` from the feature directory."""
         if self.feature_paths:
-            feat_dir = os.path.dirname(self.feature_paths[0])
-            metadata_path = os.path.join(feat_dir, "metadata.pt")
-            if os.path.exists(metadata_path):
-                meta = torch.load(metadata_path, weights_only=True)
+            meta_path = os.path.join(
+                os.path.dirname(self.feature_paths[0]), "metadata.pt"
+            )
+            if os.path.exists(meta_path):
+                meta = torch.load(meta_path, weights_only=True)
                 self.feature_dim = meta["feature_dim"]
                 self.include_flip = meta.get("include_flip", False)
-            else:
-                self.feature_dim = 768
-                self.include_flip = False
-        else:
-            self.feature_dim = 768
-            self.include_flip = False
+                return
+        self.feature_dim = 768
+        self.include_flip = False
 
-        # Load poses (subsampled by pose_step).
-        # Prefer binary BLOBs from the DB (fast) over text files (slow).
+    def _load_poses(self, db_path: str | None) -> None:
+        """Populate ``self.poses`` and ``self.step_scale`` (DB BLOBs preferred)."""
         self.poses = []
         self.step_scale = []
 
@@ -107,10 +110,7 @@ class FilteredFeatDataset(Dataset):
 
         for i, pp in enumerate(tqdm(self.pose_paths, desc="Loading poses")):
             pose = None
-            seg_name = self.segment_names[i]
-            seg_id = seg_name_to_id.get(seg_name)
-
-            # Try DB first
+            seg_id = seg_name_to_id.get(self.segment_names[i])
             if db_conn is not None and seg_id is not None:
                 row = db_conn.execute(
                     "SELECT pose_data FROM segment_poses WHERE segment_id = ?",
@@ -120,8 +120,6 @@ class FilteredFeatDataset(Dataset):
                     full = load_pose_from_blob(row["pose_data"])
                     if full.shape[0] > 0:
                         pose = full[:: self.pose_step]
-
-            # Fall back to text file
             if pose is None and pp:
                 pose = load_pose_from_text(pp)[:: self.pose_step]
 
@@ -132,22 +130,16 @@ class FilteredFeatDataset(Dataset):
         if db_conn is not None:
             db_conn.close()
 
-        # Camera intrinsics (optional)
-        self._camera = self._parse_camera_intrinsics(cfg)
-
-        # Augmentation
-        self.augment = mode == "train"
+    def _setup_augmentation(self) -> None:
+        self.augment = self.mode == "train"
         self.horizontal_flip_prob = (
-            getattr(cfg.data, "horizontal_flip_prob", 0.5)
+            getattr(self.cfg.data, "horizontal_flip_prob", 0.5)
             if (self.augment and self.include_flip)
             else 0.0
         )
 
-        # Per-worker feature cache
-        self._feat_cache = {"idx": None, "data": None}
-
-        # Video paths for decord visualisation
-        _VIDEO_EXTS = (".mp4", ".webm", ".mkv", ".avi", ".mov")
+    def _resolve_image_paths(self) -> None:
+        """Classify each ``rgb_path`` as a JPG directory or an MP4 file."""
         self.image_dirs = []
         self.video_paths_list = []
         for rp in self.rgb_paths:

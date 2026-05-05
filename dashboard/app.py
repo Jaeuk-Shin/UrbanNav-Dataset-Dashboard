@@ -34,7 +34,7 @@ def main(data_root: str | None = None):
                                     key="_db_path")
     if db_path and not Path(db_path).exists():
         st.sidebar.caption("DB not found — curation queries will be unavailable")
-    # Make the DB path available to dashboard.clip (for trajectory rendering)
+    # Make the DB path available to clip_playback (for trajectory rendering)
     # without threading it through every visualizer signature.
     st.session_state["_clip_db_path"] = db_path
 
