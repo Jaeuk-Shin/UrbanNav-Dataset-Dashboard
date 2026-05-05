@@ -9,7 +9,7 @@ from pathlib import Path
 import cv2
 from tqdm import tqdm
 
-from core.frames import FrameRef
+from pipeline.frames import FrameRef
 
 
 def _video_frame_refs(video_path, fps):

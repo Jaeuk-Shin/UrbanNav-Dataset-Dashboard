@@ -6,8 +6,8 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from core.discovery import discover_segments, total_frames
-from core.frames import prefetch_segments
+from pipeline.discovery import discover_segments, total_frames
+from pipeline.frames import prefetch_segments
 
 STAGES = {}
 

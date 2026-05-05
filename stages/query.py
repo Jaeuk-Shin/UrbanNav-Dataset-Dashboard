@@ -8,8 +8,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from core.discovery import discover_segments
-from core.frames import load_frame
+from pipeline.discovery import discover_segments
+from pipeline.frames import load_frame
 
 
 def run_query(args):

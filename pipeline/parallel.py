@@ -23,7 +23,7 @@ def run_parallel(stage_name, args):
         return
 
     import multiprocessing as mp
-    from core.discovery import discover_segments
+    from pipeline.discovery import discover_segments
 
     all_segs = list(
         discover_segments(

@@ -23,7 +23,7 @@ Video dataset example:
 
 import argparse
 
-from core.parallel import run_parallel
+from pipeline.parallel import run_parallel
 from stages import STAGES
 from stages.query import run_query
 
