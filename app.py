@@ -28,6 +28,16 @@ def main(data_root: str | None = None):
     filtered = [s for s in segs if fnmatch(s, pat)]
     st.sidebar.caption(f"{len(filtered)} / {len(segs)} segments")
 
+    # ── Sidebar: curation DB ────────────────────────────────────────────────
+    st.sidebar.markdown("---")
+    db_path = st.sidebar.text_input("Curation DB (optional)", "youtube.db",
+                                    key="_db_path")
+    if db_path and not Path(db_path).exists():
+        st.sidebar.caption("DB not found — curation queries will be unavailable")
+    # Make the DB path available to dash_clip (for trajectory rendering)
+    # without threading it through every visualizer signature.
+    st.session_state["_clip_db_path"] = db_path
+
     # ── Sidebar: query selection + params ────────────────────────────────────
     st.sidebar.markdown("---")
     qmap = {q.name: q for q in QUERIES}
@@ -35,6 +45,7 @@ def main(data_root: str | None = None):
     query = qmap[sel]
     st.sidebar.caption(query.description)
     params = query.build_params()
+    params["db_path"] = db_path
     max_n = st.sidebar.slider("Max results", 10, 200, 40, key="_max_n")
 
     # Clear stale results when switching query type

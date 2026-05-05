@@ -6,11 +6,13 @@ import cv2
 import numpy as np
 import streamlit as st
 
+from dash_clip import play_button, show_selected_clip
 from dash_types import QueryOutput
 from dash_visualizers._common import PALETTE, load_rgb
 
 
 def vis_mask(output: QueryOutput, root: Path, max_n: int):
+    show_selected_clip(root)
     items = output.results[:max_n]
     if not items:
         st.info("No results.")
@@ -45,3 +47,4 @@ def vis_mask(output: QueryOutput, root: Path, max_n: int):
             labels = ", ".join(m["label"] for m in r.metadata.get("masks", []))
             st.image(img, caption=f"{r.segment}/{r.frame_id}\n{labels}",
                      use_container_width=True)
+            play_button(i, r.segment, r.frame_id, "mask")

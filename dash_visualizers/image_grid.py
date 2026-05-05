@@ -4,11 +4,13 @@ from pathlib import Path
 
 import streamlit as st
 
+from dash_clip import play_button, show_selected_clip
 from dash_types import QueryOutput
 from dash_visualizers._common import load_rgb
 
 
 def vis_image_grid(output: QueryOutput, root: Path, max_n: int):
+    show_selected_clip(root)
     items = output.results[:max_n]
     if not items:
         st.info("No results.")
@@ -26,3 +28,4 @@ def vis_image_grid(output: QueryOutput, root: Path, max_n: int):
                 st.caption(r.metadata["caption"][:180])
             if r.metadata.get("tags"):
                 st.caption("Tags: " + ", ".join(r.metadata["tags"]))
+            play_button(i, r.segment, r.frame_id, "grid")

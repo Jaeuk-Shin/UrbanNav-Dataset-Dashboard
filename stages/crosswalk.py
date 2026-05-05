@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from stages.base import BaseStage
 
-DEFAULT_PROMPT = "crosswalk"
+DEFAULT_PROMPT = "crosswalk."
 
 
 class CrosswalkStage(BaseStage):
@@ -18,7 +18,9 @@ class CrosswalkStage(BaseStage):
     def add_arguments(cls, parser):
         parser.add_argument(
             "--crosswalk-prompt", default=DEFAULT_PROMPT,
-            help="Text prompt for Grounding DINO (default: crosswalk)")
+            help="Text prompt for Grounding DINO. Must end with a period — "
+                 "Grounding DINO uses '.' as the noun-phrase delimiter "
+                 "(default: 'crosswalk.')")
         parser.add_argument(
             "--crosswalk-box-threshold", type=float, default=0.3,
             help="Box confidence threshold (default: 0.3)")
@@ -46,8 +48,15 @@ class CrosswalkStage(BaseStage):
         self.prompt = args.crosswalk_prompt
         self.box_thr = args.crosswalk_box_threshold
         self.nms_thr = args.crosswalk_nms_threshold
+        # Canonical noun phrases from the prompt; any detection whose label
+        # doesn't match one of these (e.g. BERT subword pieces like '##walk')
+        # is discarded in process_segment.
+        self.canon_labels = {
+            p.strip().lower() for p in self.prompt.split(".") if p.strip()
+        }
 
         print(f"  Prompt: \"{self.prompt}\"  box_thr={self.box_thr}  nms_thr={self.nms_thr}")
+        print(f"  Keep labels: {sorted(self.canon_labels)}")
 
     def should_skip(self, out_dir, args):
         return (out_dir / "crosswalks.json").exists()
@@ -100,6 +109,8 @@ class CrosswalkStage(BaseStage):
 
                 entries = []
                 for box, score, label in zip(boxes, scores, labels):
+                    if not label or label.strip().lower() not in self.canon_labels:
+                        continue  # drop subword pieces (e.g. '##walk') / off-prompt labels
                     x1, y1, x2, y2 = box.tolist()
                     entries.append({
                         "bbox": [round(x1, 1), round(y1, 1),

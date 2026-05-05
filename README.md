@@ -1,6 +1,6 @@
 # OMR Dataset Toolkit
 
-Two-part toolkit for the OMR outdoor mobile robot dataset:
+Three-part toolkit for the OMR outdoor mobile robot dataset:
 
 1. **Annotation pipeline** (`annotate.py`) — GPU-accelerated annotation
    generation: pedestrian detection (YOLOv8), captioning (Florence-2),
@@ -8,6 +8,9 @@ Two-part toolkit for the OMR outdoor mobile robot dataset:
    detection.  Multi-GPU support.
 2. **Explorer dashboard** (`app.py`) — plugin-based Streamlit dashboard for
    browsing annotated data.  Queries filter data; visualizers render results.
+3. **Curation pipeline** (`curation/`) — SQLite-backed data quality filtering
+   and offline lookup-table (LUT) generation for training.  Filters noisy
+   YouTube walking-video data and caches only valid trajectory windows.
 
 ## Quickstart
 
@@ -31,6 +34,31 @@ python annotate.py query "person crossing street" --top-k 20
 
 # Video dataset
 python annotate.py all --data-root video_dataset --input-format video --fps 0.2
+```
+
+### Curation pipeline
+
+```bash
+pip install numpy scipy tqdm
+
+# 1) Ingest — catalog all segments into a SQLite database (no splits yet)
+python -m curation ingest /path/to/youtube_videos --db youtube.db
+
+# 2) Filter — compute per-frame quality metrics and validity masks
+python -m curation filter --db youtube.db
+
+# 3) Assign splits — only among segments that passed filtering
+python -m curation assign-splits --db youtube.db \
+    --num-train 1400 --num-val 50
+
+# 4) Build LUT — create cached lookup tables for training
+python -m curation build-lut --db youtube.db --split train \
+    --context-size 5 --wp-length 5 --pose-step 2 -o lut_train.npz
+python -m curation build-lut --db youtube.db --split val \
+    --context-size 5 --wp-length 5 --pose-step 2 -o lut_val.npz
+
+# 5) Stats — inspect the database
+python -m curation stats --db youtube.db
 ```
 
 ### Explorer dashboard
@@ -89,6 +117,18 @@ stages/
     crosswalk.py                    # Grounding DINO crosswalk detection
     query.py                        # text-based image retrieval
 
+curation/
+    __init__.py                     # package init
+    __main__.py                     # `python -m curation` entry point
+    cli.py                          # CLI: ingest, filter, build-lut, stats
+    schema.sql                      # SQLite schema definition
+    database.py                     # connection helpers, schema bootstrap
+    ingest.py                       # scan dataset dirs, populate DB
+    filters.py                      # quality filters + FilterConfig
+    build_lut.py                    # build cached lookup tables (.npz)
+    dataset.py                      # FilteredFeatDataset (PyTorch Dataset)
+    datamodule.py                   # FilteredMixtureDataModule (Lightning)
+
 dashboard.py                        # dashboard entry point (streamlit run dashboard.py)
 app.py                              # Streamlit main()
 dash_types.py                       # result dataclasses
@@ -142,6 +182,131 @@ class MyStage(BaseStage):
 The `BaseStage.run()` template handles discovery, prefetching, progress bars,
 and skip logic.  Multi-GPU parallelism splits segments across GPUs via
 `core/parallel.py`.
+
+## Curation pipeline
+
+The curation pipeline filters noisy YouTube walking-video data and produces
+cached lookup tables (LUTs) for training a flow-matching navigation model.
+It replaces the runtime LUT construction in `CarlaFeatDataset` with an offline
+pipeline that only retains trajectory windows passing data quality filters.
+
+### Pipeline stages
+
+```
+ingest ──► filter ──► assign-splits ──► build-lut ──► training
+  │          │             │                │             │
+  │ scan     │ per-frame   │ train/val/test │ (seg,start) │ FilteredFeatDataset
+  │ dirs,    │ metrics +   │ among filtered │ pairs for   │ loads .npz at init
+  │ populate │ validity    │ segments only  │ valid       │
+  │ SQLite   │ masks       │               │ windows     │
+  ▼          ▼             ▼               ▼             ▼
+youtube.db youtube.db   youtube.db     lut_train.npz  training loop
+```
+
+### Database schema
+
+The SQLite database (`youtube.db`) contains seven tables:
+
+| Table | Description |
+|-------|-------------|
+| `videos` | One row per source YouTube video (name) |
+| `segments` | One row per segment: file paths (pose, features, rgb, annotations), frame count, train/val/test split |
+| `segment_poses` | Pre-parsed pose trajectories as binary BLOBs — float64 `(N, 7)` arrays `[x,y,z,qx,qy,qz,qw]`. Eliminates `np.loadtxt` text parsing (~18x faster reads) |
+| `frame_annotations` | One row per annotated frame: `segment_id`, `frame_index`, `pedestrian_count`, `crosswalk_count`. Indexed on `(segment_id, frame_index)` for fast lookups |
+| `detections` | One row per individual detection (pedestrian or crosswalk): class label, confidence, bounding box `(x1, y1, x2, y2)`. FK to `frame_annotations`. Indexed on `(class_label, confidence)` for threshold queries |
+| `segment_filter_data` | Per-frame filter metrics as numpy BLOBs: velocities, forward-camera angles, roll/yaw changes, combined valid_mask |
+| `lut_cache` | Registry of cached LUT files with filter config hash for invalidation |
+
+Annotation data from `detections.json` and `crosswalks.json` is materialised
+into `frame_annotations` + `detections` during the `ingest` step.  This avoids
+repeated JSON parsing during filtering and enables SQL-level queries like:
+
+```sql
+-- Frames with 5+ confident pedestrians in a specific split
+SELECT s.name, fa.frame_index, fa.pedestrian_count
+FROM frame_annotations fa
+JOIN segments s ON fa.segment_id = s.segment_id
+WHERE s.split = 'train'
+  AND (SELECT COUNT(*) FROM detections d
+       WHERE d.frame_ann_id = fa.frame_ann_id
+         AND d.class_label = 'pedestrian'
+         AND d.confidence >= 0.6) >= 5;
+```
+
+### Data quality filters
+
+All filters compute per-frame metrics, smooth them over a sliding window
+(`--avg-window`, default 5 frames), and threshold.  The combined mask is the
+logical AND of all individual masks.
+
+| Filter | Metric | Default threshold | Annotation source |
+|--------|--------|-------------------|-------------------|
+| **Forward vs camera vector** | Angle between velocity direction and camera z-axis | 60 degrees | Pose only |
+| **Large roll/yaw changes** | Per-frame roll and yaw Euler angle changes | 30 / 45 degrees | Pose only |
+| **Stop without reasons** | Velocity below threshold without crosswalk or pedestrian justification | 0.005 distance/frame | Pose + `frame_annotations` / `detections` tables |
+
+The stop-without-reasons filter queries the `frame_annotations` and
+`detections` tables (populated during ingestion) to find the nearest annotated
+frame and check for crosswalks (confidence >= 0.3) or pedestrians (count >= 1
+at confidence >= 0.4).
+
+### Filter configuration
+
+All thresholds are CLI flags and are stored in the `.npz` for reproducibility:
+
+```bash
+python -m curation filter --db youtube.db \
+    --forward-camera-max-angle 60 \
+    --max-roll-change 30 \
+    --max-yaw-change 45 \
+    --stop-velocity-threshold 0.005 \
+    --pedestrian-confidence 0.4 \
+    --min-pedestrians 1 \
+    --crosswalk-confidence 0.3 \
+    --avg-window 5
+```
+
+### LUT file format
+
+The `build-lut` command writes a `.npz` with these arrays:
+
+| Key | Shape | Description |
+|-----|-------|-------------|
+| `segment_names` | `(S,)` | Segment name strings |
+| `segment_paths` | `(S, 4)` | `[pose_path, feature_path, rgb_path, annotation_dir]` per segment |
+| `lut` | `(M, 2)` int32 | `(segment_local_idx, pose_start)` per valid window |
+| `video_ranges` | `(S, 2)` int32 | LUT row range `[start, end)` per segment |
+| `filter_cfg` | scalar | JSON string of the `FilterConfig` used |
+| `pose_step` | scalar | Pose subsampling stride |
+| `context_size` | scalar | History window length |
+| `wp_length` | scalar | Future waypoint length |
+| `split` | scalar | `'train'`, `'val'`, or `'test'` |
+
+A window at `(segment_idx, pose_start)` is included only if **every** frame in
+`[pose_start, pose_start + context_size + wp_length)` passes the combined
+filter mask (after pose-step subsampling).
+
+### Training integration
+
+Add `lut_train` / `lut_val` paths to the dataset mixture config:
+
+```yaml
+data:
+  type: filtered_feat_mixture     # use FilteredMixtureDataModule
+  mixture:
+    - root: '/home3/rvl/dataset/carla/v0.1'
+      weight: 0.3
+      camera: { ... }             # no LUT — uses CarlaFeatDataset as before
+    - root: '/home3/rvl/dataset/youtube_videos'
+      weight: 0.7
+      lut_train: 'lut_train.npz'  # pre-built filtered LUT
+      lut_val:   'lut_val.npz'
+      camera: { ... }
+```
+
+`FilteredMixtureDataModule` from `curation.datamodule` is a drop-in
+replacement for `UrbanNavFeatMixtureDataModule`.  Entries with `lut_*` keys
+use `FilteredFeatDataset`; entries without fall back to `CarlaFeatDataset`.
 
 ## Dashboard architecture
 

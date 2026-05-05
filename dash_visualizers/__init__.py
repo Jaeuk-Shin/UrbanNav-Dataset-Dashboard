@@ -12,6 +12,8 @@ from dash_visualizers.detection import vis_detection
 from dash_visualizers.mask import vis_mask
 from dash_visualizers.trajectory import vis_trajectory
 from dash_visualizers.table import vis_table
+from dash_visualizers.filter_summary import vis_filter_summary
+from dash_visualizers.filter_timeline import vis_filter_timeline
 
 VISUALIZERS = {
     "image_grid": vis_image_grid,
@@ -19,4 +21,6 @@ VISUALIZERS = {
     "mask": vis_mask,
     "trajectory": vis_trajectory,
     "table": vis_table,
+    "filter_summary": vis_filter_summary,
+    "filter_timeline": vis_filter_timeline,
 }
