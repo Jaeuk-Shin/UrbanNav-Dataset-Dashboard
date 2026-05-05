@@ -5,7 +5,7 @@ Each filter produces a per-frame boolean mask (True = valid).  The combined
 mask is the intersection (logical AND) of all individual masks.
 
 All angular metrics are averaged over a sliding window before thresholding
-to reduce noise sensitivity (as recommended in FILTERS.md).
+to reduce noise sensitivity (as recommended in docs/FILTERS.md).
 
 Usage::
 

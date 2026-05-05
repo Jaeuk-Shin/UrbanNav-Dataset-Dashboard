@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 *.pt
+docs/refactor.md
+CLAUDE.md
