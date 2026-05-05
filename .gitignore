@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 *.pt
+*.egg-info/
+.pytest_cache/
 docs/refactor.md
 CLAUDE.md

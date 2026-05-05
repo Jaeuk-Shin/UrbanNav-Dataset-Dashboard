@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omr"
+version = "0.1.0"
+description = "OMR outdoor mobile robot dataset toolkit: annotation, curation, dashboard."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "tqdm",
+    "Pillow",
+    "opencv-python",
+    "scipy",
+]
+
+[project.optional-dependencies]
+annotate = [
+    "torch",
+    "torchvision",
+    "transformers",
+    "ultralytics",
+    "open-clip-torch",
+    "scikit-image",
+]
+curation = [
+    "pytorch-lightning",
+    "omegaconf",
+]
+dashboard = [
+    "streamlit",
+    "plotly",
+    "pandas",
+]
+test = [
+    "pytest",
+]
+
+[project.scripts]
+annotate = "annotate:main"
+curation = "curation.cli:main"
+
+[tool.setuptools]
+py-modules = ["annotate"]
+
+[tool.setuptools.packages.find]
+include = ["pipeline*", "curation*", "dashboard*"]
+
+[tool.setuptools.package-data]
+curation = ["schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
