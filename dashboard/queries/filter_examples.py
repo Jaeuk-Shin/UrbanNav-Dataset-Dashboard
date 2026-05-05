@@ -12,12 +12,10 @@ from ..query import Query
 from ..types import QueryOutput, FrameResult
 
 from curation.database import get_connection
-from curation.filters import FilterConfig
-
-from .filter_diagnostic import _build_individual_masks
+from curation.filters import FilterConfig, compute_filter_masks
 
 
-# The 10 curation filters. Names match `_build_individual_masks` keys
+# The 10 curation filters. Names match `compute_filter_masks` keys
 # (plus `stop_without_reasons`, inferred from combined vs AND-of-others).
 FILTER_CHOICES = [
     "forward_camera_angle",
@@ -79,28 +77,25 @@ def _scan_rejections(db_path: str, filter_name: str,
         if nf == 0:
             continue
 
-        metrics: dict[str, list[float]] = {}
+        metrics: dict[str, np.ndarray] = {}
         for k in _METRIC_KEYS:
             blob = r[k]
-            metrics[k] = (np.frombuffer(blob, dtype=np.float32).tolist()
-                          if blob else [0.0] * nf)
+            metrics[k] = (np.frombuffer(blob, dtype=np.float32)
+                          if blob else np.zeros(nf, dtype=np.float32))
 
-        ind = _build_individual_masks(metrics, nf, cfg)
+        ind = compute_filter_masks(metrics, cfg)
         combined = np.frombuffer(r["valid_mask"], dtype=np.uint8).astype(bool)
 
         if filter_name == "stop_without_reasons":
-            and_others = np.ones(nf, dtype=bool)
-            for m in ind.values():
-                and_others &= np.array(m, dtype=bool)
+            and_others = np.logical_and.reduce(list(ind.values()))
             rejected = np.where(and_others & ~combined)[0]
         else:
-            mask = np.array(ind[filter_name], dtype=bool)
-            rejected = np.where(~mask)[0]
+            rejected = np.where(~ind[filter_name])[0]
 
         if rejected.size == 0:
             continue
 
-        mvals = metrics.get(metric_col, [0.0] * nf)
+        mvals = metrics.get(metric_col, np.zeros(nf, dtype=np.float32)).tolist()
         out.append({
             "segment": r["name"],
             "rejected": rejected.tolist(),

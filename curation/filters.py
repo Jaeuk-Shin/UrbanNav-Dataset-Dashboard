@@ -373,77 +373,71 @@ def compute_all_metrics(
     }
 
 
-def build_valid_mask(
+def compute_filter_masks(
     metrics: dict[str, np.ndarray],
     cfg: FilterConfig,
     *,
     conn=None,
     segment_id: int | None = None,
-) -> np.ndarray:
-    """Combine all filter masks into a single per-frame boolean mask.
+) -> dict[str, np.ndarray]:
+    """Per-filter boolean masks (True = passes that filter).
 
     Metrics are smoothed before thresholding.  The stop-without-reasons
-    filter is only applied when *conn* and *segment_id* are provided and
-    the segment has annotation rows in the database.
+    mask is included only when *conn* and *segment_id* are provided.
 
-    Filter order:
-        1) Forward-vs-camera angle
-        2) Roll changes
-        3) Pitch changes
-        4) Yaw changes
-        5) Absolute pitch bounds
-        6) Absolute roll bounds
-        7) Velocity spikes
-        8) Height changes
-        9) Sustained low speed
-       10) Stop-without-reasons
+    The returned dict's iteration order is the filter order baked into the
+    legacy ``build_valid_mask`` AND-chain:
+
+        forward_camera_angle, roll_change, pitch_change, yaw_change,
+        abs_pitch, abs_roll, velocity_spike, height_change,
+        sustained_slow, stop_without_reasons.
     """
     N = len(metrics["velocities"])
-    mask = np.ones(N, dtype=bool)
     hw = cfg.avg_window
+    masks: dict[str, np.ndarray] = {}
 
     # 1) Forward-vs-camera angle
-    angles_smooth = smooth_window(metrics["forward_camera_angles"], hw)
-    mask &= angles_smooth <= cfg.forward_camera_max_angle
+    s = smooth_window(metrics["forward_camera_angles"], hw)
+    masks["forward_camera_angle"] = s <= cfg.forward_camera_max_angle
 
     # 2) Roll changes
-    roll_smooth = smooth_window(metrics["roll_changes"], hw)
-    mask &= roll_smooth <= cfg.max_roll_change
+    s = smooth_window(metrics["roll_changes"], hw)
+    masks["roll_change"] = s <= cfg.max_roll_change
 
     # 3) Pitch changes
-    pitch_smooth = smooth_window(metrics["pitch_changes"], hw)
-    mask &= pitch_smooth <= cfg.max_pitch_change
+    s = smooth_window(metrics["pitch_changes"], hw)
+    masks["pitch_change"] = s <= cfg.max_pitch_change
 
     # 4) Yaw changes
-    yaw_smooth = smooth_window(metrics["yaw_changes"], hw)
-    mask &= yaw_smooth <= cfg.max_yaw_change
+    s = smooth_window(metrics["yaw_changes"], hw)
+    masks["yaw_change"] = s <= cfg.max_yaw_change
 
     # 5) Absolute pitch bounds
-    abs_pitch_smooth = smooth_window(metrics["abs_pitch"], hw)
-    mask &= abs_pitch_smooth <= cfg.max_abs_pitch
+    s = smooth_window(metrics["abs_pitch"], hw)
+    masks["abs_pitch"] = s <= cfg.max_abs_pitch
 
     # 6) Absolute roll bounds
-    abs_roll_smooth = smooth_window(metrics["abs_roll"], hw)
-    mask &= abs_roll_smooth <= cfg.max_abs_roll
+    s = smooth_window(metrics["abs_roll"], hw)
+    masks["abs_roll"] = s <= cfg.max_abs_roll
 
     # 7) Velocity spikes (scale-invariant via segment median)
     vel = metrics["velocities"]
     nonzero_vel = vel[vel > 1e-8]
-    if len(nonzero_vel) > 0:
-        median_vel = np.median(nonzero_vel)
-        spike_thresh = cfg.velocity_spike_factor * median_vel
-        mask &= vel <= spike_thresh
+    median_vel = float(np.median(nonzero_vel)) if len(nonzero_vel) > 0 else 0.0
+    if median_vel > 0:
+        masks["velocity_spike"] = vel <= cfg.velocity_spike_factor * median_vel
+    else:
+        masks["velocity_spike"] = np.ones(N, dtype=bool)
 
     # 8) Height changes
-    hc_smooth = smooth_window(metrics["height_changes"], hw)
-    mask &= hc_smooth <= cfg.max_height_change_ratio
+    s = smooth_window(metrics["height_changes"], hw)
+    masks["height_change"] = s <= cfg.max_height_change_ratio
 
     # 9) Sustained low speed (flag long runs of slow frames)
-    if len(nonzero_vel) > 0:
+    slow_mask = np.ones(N, dtype=bool)
+    if median_vel > 0:
         vel_smooth = smooth_window(vel, hw)
-        slow_thresh = cfg.sustained_slow_factor * median_vel
-        is_slow = vel_smooth < slow_thresh
-        # Find runs of consecutive slow frames using diff on the boolean mask
+        is_slow = vel_smooth < cfg.sustained_slow_factor * median_vel
         changes = np.diff(is_slow.astype(np.int8))
         run_starts = np.where(changes == 1)[0] + 1
         run_ends = np.where(changes == -1)[0] + 1
@@ -451,37 +445,48 @@ def build_valid_mask(
             run_starts = np.concatenate([[0], run_starts])
         if is_slow[-1]:
             run_ends = np.concatenate([run_ends, [N]])
-        for s, e in zip(run_starts, run_ends):
-            if e - s >= cfg.sustained_slow_frames:
-                mask[s:e] = False
+        for a, b in zip(run_starts, run_ends):
+            if b - a >= cfg.sustained_slow_frames:
+                slow_mask[a:b] = False
+    masks["sustained_slow"] = slow_mask
 
     # 10) Stop-without-reasons (requires annotations in DB)
     if conn is not None and segment_id is not None:
+        stop_mask = np.ones(N, dtype=bool)
         ann_indices = _load_annotation_index(conn, segment_id)
         if len(ann_indices) > 0:
             vel_smooth = smooth_window(metrics["velocities"], hw)
             stopped = np.where(vel_smooth < cfg.stop_velocity_threshold)[0]
             if len(stopped) > 0:
-                # Bulk-load which annotated frames have justifications
                 justified_frames = _load_justified_frames(conn, segment_id, cfg)
-
                 if not justified_frames:
-                    # No justified annotations at all — all stopped frames fail
-                    mask[stopped] = False
+                    stop_mask[stopped] = False
                 else:
-                    # For each stopped frame, find nearest annotated frame
-                    # and check if it's justified and within distance
                     for i in stopped:
-                        # Binary search for nearest justified annotation
                         dists = np.abs(ann_indices - i)
                         nearest_pos = np.argmin(dists)
                         nearest_frame = int(ann_indices[nearest_pos])
                         if int(dists[nearest_pos]) > cfg.stop_max_ann_distance:
-                            mask[i] = False
+                            stop_mask[i] = False
                         elif nearest_frame not in justified_frames:
-                            mask[i] = False
+                            stop_mask[i] = False
+        masks["stop_without_reasons"] = stop_mask
 
-    return mask
+    return masks
+
+
+def build_valid_mask(
+    metrics: dict[str, np.ndarray],
+    cfg: FilterConfig,
+    *,
+    conn=None,
+    segment_id: int | None = None,
+) -> np.ndarray:
+    """Combined per-frame validity = AND of every filter mask."""
+    masks = compute_filter_masks(
+        metrics, cfg, conn=conn, segment_id=segment_id,
+    )
+    return np.logical_and.reduce(list(masks.values()))
 
 
 _COMMIT_BATCH_SIZE = 500

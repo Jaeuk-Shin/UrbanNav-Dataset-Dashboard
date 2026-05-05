@@ -13,94 +13,24 @@ from ..types import QueryOutput, SegmentResult
 
 # Reuse curation internals for filter re-decomposition
 from curation.database import get_connection
-from curation.filters import FilterConfig, _smooth
+from curation.filters import FilterConfig, compute_filter_masks
 
 
-# ── Filter decomposition helpers ────────────────────────────────────────
+_METRIC_KEYS = (
+    "velocities", "forward_camera_angles",
+    "roll_changes", "pitch_changes", "yaw_changes",
+    "abs_pitch", "abs_roll", "height_changes",
+)
 
 
-def _decompose_filter_rejections(
-    metrics_row: dict[str, bytes],
-    num_frames: int,
-    cfg: FilterConfig,
-) -> dict[str, int]:
-    """Re-apply each filter individually and return per-filter rejection counts.
-
-    *metrics_row* maps column names to raw BLOB bytes from segment_filter_data.
-    """
-    hw = cfg.avg_window
-    counts: dict[str, int] = {}
-
-    def _load(key: str) -> np.ndarray:
-        blob = metrics_row.get(key)
-        if blob is None:
-            return np.zeros(num_frames, dtype=np.float32)
-        return np.frombuffer(blob, dtype=np.float32)
-
-    vel = _load("velocities")
-    nonzero_vel = vel[vel > 1e-8]
-    median_vel = float(np.median(nonzero_vel)) if len(nonzero_vel) > 0 else 0.0
-
-    # 1) forward-camera angle
-    s = _smooth(_load("forward_camera_angles"), hw)
-    counts["forward_camera_angle"] = int(np.sum(s > cfg.forward_camera_max_angle))
-
-    # 2) roll changes
-    s = _smooth(_load("roll_changes"), hw)
-    counts["roll_change"] = int(np.sum(s > cfg.max_roll_change))
-
-    # 3) pitch changes
-    s = _smooth(_load("pitch_changes"), hw)
-    counts["pitch_change"] = int(np.sum(s > cfg.max_pitch_change))
-
-    # 4) yaw changes
-    s = _smooth(_load("yaw_changes"), hw)
-    counts["yaw_change"] = int(np.sum(s > cfg.max_yaw_change))
-
-    # 5) abs pitch
-    s = _smooth(_load("abs_pitch"), hw)
-    counts["abs_pitch"] = int(np.sum(s > cfg.max_abs_pitch))
-
-    # 6) abs roll
-    s = _smooth(_load("abs_roll"), hw)
-    counts["abs_roll"] = int(np.sum(s > cfg.max_abs_roll))
-
-    # 7) velocity spikes
-    if median_vel > 0:
-        spike_thresh = cfg.velocity_spike_factor * median_vel
-        counts["velocity_spike"] = int(np.sum(vel > spike_thresh))
-    else:
-        counts["velocity_spike"] = 0
-
-    # 8) height changes
-    s = _smooth(_load("height_changes"), hw)
-    counts["height_change"] = int(np.sum(s > cfg.max_height_change_ratio))
-
-    # 9) sustained slow (approximate: count frames in long slow runs)
-    if median_vel > 0:
-        vel_smooth = _smooth(vel, hw)
-        slow_thresh = cfg.sustained_slow_factor * median_vel
-        is_slow = vel_smooth < slow_thresh
-        changes = np.diff(is_slow.astype(np.int8))
-        starts = np.where(changes == 1)[0] + 1
-        ends = np.where(changes == -1)[0] + 1
-        if is_slow[0]:
-            starts = np.concatenate([[0], starts])
-        if is_slow[-1]:
-            ends = np.concatenate([ends, [num_frames]])
-        cnt = 0
-        for a, b in zip(starts, ends):
-            if b - a >= cfg.sustained_slow_frames:
-                cnt += b - a
-        counts["sustained_slow"] = cnt
-    else:
-        counts["sustained_slow"] = 0
-
-    # 10) stop-without-reasons is DB-dependent (annotation queries)
-    # We estimate from valid_mask vs sum of other masks
-    # (exact count would require re-querying annotations)
-
-    return counts
+def _decode_metrics(row, num_frames: int) -> dict[str, np.ndarray]:
+    """Deserialise per-frame metric BLOBs into ``(N,) float32`` arrays."""
+    out: dict[str, np.ndarray] = {}
+    for key in _METRIC_KEYS:
+        blob = row[key]
+        out[key] = (np.frombuffer(blob, dtype=np.float32) if blob
+                    else np.zeros(num_frames, dtype=np.float32))
+    return out
 
 
 @st.cache_data(ttl=3600, show_spinner="Computing per-filter breakdown...")
@@ -145,20 +75,11 @@ def _compute_aggregate(db_path: str, _mtime: float):
         else:
             dead += 1
 
-        # Per-filter decomposition
-        metrics_row = {
-            "velocities": r["velocities"],
-            "forward_camera_angles": r["forward_camera_angles"],
-            "roll_changes": r["roll_changes"],
-            "pitch_changes": r["pitch_changes"],
-            "yaw_changes": r["yaw_changes"],
-            "abs_pitch": r["abs_pitch"],
-            "abs_roll": r["abs_roll"],
-            "height_changes": r["height_changes"],
-        }
-        filt_counts = _decompose_filter_rejections(metrics_row, nf, cfg)
-        for k, v in filt_counts.items():
-            per_filter[k] = per_filter.get(k, 0) + v
+        # Per-filter decomposition (filters 1-9 + sustained_slow; stop_without_reasons
+        # is DB-annotation-dependent and not counted here).
+        filt_masks = compute_filter_masks(_decode_metrics(r, nf), cfg)
+        for k, m in filt_masks.items():
+            per_filter[k] = per_filter.get(k, 0) + int(np.sum(~m))
 
         # Per-video accumulation
         vid = r["video"]
