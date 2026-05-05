@@ -8,7 +8,7 @@ from ..types import QueryOutput, SegmentResult
 from ..loaders import load_poses, DATASET_FPS
 
 
-class EgoVelocityQuery(Query):
+class EgoVelocity(Query):
     name = "Ego Velocity"
     description = "Segments whose average XZ-plane velocity exceeds a threshold"
 

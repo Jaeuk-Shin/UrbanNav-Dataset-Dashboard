@@ -9,7 +9,7 @@ import streamlit as st
 from ..types import QueryOutput
 
 
-def vis_trajectory(output: QueryOutput, root: Path, max_n: int):
+def trajectory(output: QueryOutput, root: Path, max_n: int):
     items = output.results[:max_n]
     if not items:
         st.info("No results.")

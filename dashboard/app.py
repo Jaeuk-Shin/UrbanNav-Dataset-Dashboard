@@ -8,7 +8,7 @@ import streamlit as st
 from dashboard.loaders import list_segments, load_segment_cache
 from dashboard.queries import QUERIES
 from dashboard.visualizers import VISUALIZERS
-from dashboard.visualizers.table import vis_table
+from dashboard.visualizers.table import table as table_fallback
 
 
 def main(data_root: str | None = None):
@@ -63,6 +63,6 @@ def main(data_root: str | None = None):
     if out is not None:
         st.subheader(out.title)
         st.caption(out.description)
-        VISUALIZERS.get(out.viz_type, vis_table)(out, root, max_n)
+        VISUALIZERS.get(out.viz_type, table_fallback)(out, root, max_n)
     else:
         st.info("Select a query and click **Run Query** to explore the dataset.")

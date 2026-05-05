@@ -22,7 +22,7 @@ def _draw(img, boxes, color):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
 
-def vis_detection(output: QueryOutput, root: Path, max_n: int):
+def detection(output: QueryOutput, root: Path, max_n: int):
     show_selected_clip(root)
     items = output.results[:max_n]
     if not items:

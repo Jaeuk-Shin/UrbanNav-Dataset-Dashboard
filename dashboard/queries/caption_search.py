@@ -7,7 +7,7 @@ from ..types import QueryOutput, FrameResult
 from ..loaders import load_json
 
 
-class CaptionSearchQuery(Query):
+class CaptionSearch(Query):
     name = "Caption Search"
     description = "Frames whose caption or tags match a keyword"
 

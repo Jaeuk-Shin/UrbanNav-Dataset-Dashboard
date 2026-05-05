@@ -7,7 +7,7 @@ from ..types import QueryOutput, FrameResult
 from ..loaders import load_json
 
 
-class PedestrianCountQuery(Query):
+class PedestrianCount(Query):
     name = "Pedestrian Count"
     description = "Frames with N+ pedestrians above a confidence threshold"
 

@@ -9,7 +9,7 @@ from ..types import QueryOutput
 from ._common import load_rgb
 
 
-def vis_image_grid(output: QueryOutput, root: Path, max_n: int):
+def image_grid(output: QueryOutput, root: Path, max_n: int):
     show_selected_clip(root)
     items = output.results[:max_n]
     if not items:

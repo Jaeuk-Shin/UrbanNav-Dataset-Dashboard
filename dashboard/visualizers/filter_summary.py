@@ -9,7 +9,7 @@ import streamlit as st
 from ..types import QueryOutput
 
 
-def vis_filter_summary(output: QueryOutput, root: Path, max_n: int):
+def filter_summary(output: QueryOutput, root: Path, max_n: int):
     if not output.results:
         st.info("No data.")
         return

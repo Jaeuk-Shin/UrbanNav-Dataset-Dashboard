@@ -17,7 +17,7 @@ from ..types import QueryOutput, FrameResult
 from curation.database import get_connection
 
 
-class CrosswalkCountQuery(Query):
+class CrosswalkCount(Query):
     name = "Crosswalk Count"
     description = "Frames with N+ crosswalk detections above a confidence threshold"
 

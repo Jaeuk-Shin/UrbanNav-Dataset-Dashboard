@@ -7,7 +7,7 @@ from ..types import QueryOutput, FrameResult
 from ..loaders import load_json
 
 
-class ObjectPresenceQuery(Query):
+class ObjectPresence(Query):
     name = "Object in Masks"
     description = "Frames containing a specific object label in segmentation masks"
 

@@ -43,7 +43,7 @@ def _mask_to_regions(mask: list[bool]) -> list[tuple[int, int, bool]]:
     return regions
 
 
-def vis_filter_timeline(output: QueryOutput, root: Path, max_n: int):
+def filter_timeline(output: QueryOutput, root: Path, max_n: int):
     items = output.results[:max_n]
     if not items:
         st.info("No results.")

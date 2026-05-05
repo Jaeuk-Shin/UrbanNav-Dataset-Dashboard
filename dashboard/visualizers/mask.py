@@ -11,7 +11,7 @@ from ..types import QueryOutput
 from ._common import PALETTE, load_rgb
 
 
-def vis_mask(output: QueryOutput, root: Path, max_n: int):
+def mask(output: QueryOutput, root: Path, max_n: int):
     show_selected_clip(root)
     items = output.results[:max_n]
     if not items:
