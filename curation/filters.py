@@ -22,6 +22,7 @@ from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
 from .database import get_connection
+from .poses import load_pose_from_blob, load_pose_from_text, smooth_window
 
 # ------------------------------------------------------------------ #
 #  Filter configuration                                               #
@@ -100,55 +101,6 @@ class FilterConfig:
     @classmethod
     def from_json(cls, s: str) -> "FilterConfig":
         return cls(**json.loads(s))
-
-
-# ------------------------------------------------------------------ #
-#  Pose loading and metric computation                                #
-# ------------------------------------------------------------------ #
-
-
-def load_pose(pose_path: str) -> np.ndarray:
-    """Load a pose text file, return (N, 7) float64 array.
-
-    Prefer :func:`load_pose_from_db` when a DB connection is available —
-    it reads pre-parsed binary data and is significantly faster.
-    """
-    raw = np.loadtxt(pose_path)
-    if raw.ndim == 1:
-        raw = raw.reshape(1, -1)
-    if raw.shape[1] == 8:
-        pose = raw[:, 1:]
-    else:
-        pose = raw
-    nan_mask = np.isnan(pose).any(axis=1)
-    if nan_mask.any():
-        pose = pose[: np.argmax(nan_mask)]
-    return pose.astype(np.float64)
-
-
-def load_pose_from_db(conn, segment_id: int) -> np.ndarray:
-    """Load pre-parsed pose from the ``segment_poses`` table.
-
-    Returns (N, 7) float64 array, or empty (0, 7) if not found.
-    """
-    row = conn.execute(
-        "SELECT pose_data FROM segment_poses WHERE segment_id = ?",
-        (segment_id,),
-    ).fetchone()
-    if row is None or row["pose_data"] is None:
-        return np.empty((0, 7), dtype=np.float64)
-    return np.frombuffer(row["pose_data"], dtype=np.float64).reshape(-1, 7)
-
-
-def _smooth(arr: np.ndarray, half_window: int) -> np.ndarray:
-    """Simple uniform sliding-window average (same length as input)."""
-    if half_window <= 0 or len(arr) == 0:
-        return arr.copy()
-    kernel_size = 2 * half_window + 1
-    kernel = np.ones(kernel_size) / kernel_size
-    # Pad with edge values to preserve length
-    padded = np.pad(arr, half_window, mode="edge")
-    return np.convolve(padded, kernel, mode="valid")
 
 
 # ------------------------------------------------------------------ #
@@ -451,27 +403,27 @@ def build_valid_mask(
     hw = cfg.avg_window
 
     # 1) Forward-vs-camera angle
-    angles_smooth = _smooth(metrics["forward_camera_angles"], hw)
+    angles_smooth = smooth_window(metrics["forward_camera_angles"], hw)
     mask &= angles_smooth <= cfg.forward_camera_max_angle
 
     # 2) Roll changes
-    roll_smooth = _smooth(metrics["roll_changes"], hw)
+    roll_smooth = smooth_window(metrics["roll_changes"], hw)
     mask &= roll_smooth <= cfg.max_roll_change
 
     # 3) Pitch changes
-    pitch_smooth = _smooth(metrics["pitch_changes"], hw)
+    pitch_smooth = smooth_window(metrics["pitch_changes"], hw)
     mask &= pitch_smooth <= cfg.max_pitch_change
 
     # 4) Yaw changes
-    yaw_smooth = _smooth(metrics["yaw_changes"], hw)
+    yaw_smooth = smooth_window(metrics["yaw_changes"], hw)
     mask &= yaw_smooth <= cfg.max_yaw_change
 
     # 5) Absolute pitch bounds
-    abs_pitch_smooth = _smooth(metrics["abs_pitch"], hw)
+    abs_pitch_smooth = smooth_window(metrics["abs_pitch"], hw)
     mask &= abs_pitch_smooth <= cfg.max_abs_pitch
 
     # 6) Absolute roll bounds
-    abs_roll_smooth = _smooth(metrics["abs_roll"], hw)
+    abs_roll_smooth = smooth_window(metrics["abs_roll"], hw)
     mask &= abs_roll_smooth <= cfg.max_abs_roll
 
     # 7) Velocity spikes (scale-invariant via segment median)
@@ -483,12 +435,12 @@ def build_valid_mask(
         mask &= vel <= spike_thresh
 
     # 8) Height changes
-    hc_smooth = _smooth(metrics["height_changes"], hw)
+    hc_smooth = smooth_window(metrics["height_changes"], hw)
     mask &= hc_smooth <= cfg.max_height_change_ratio
 
     # 9) Sustained low speed (flag long runs of slow frames)
     if len(nonzero_vel) > 0:
-        vel_smooth = _smooth(vel, hw)
+        vel_smooth = smooth_window(vel, hw)
         slow_thresh = cfg.sustained_slow_factor * median_vel
         is_slow = vel_smooth < slow_thresh
         # Find runs of consecutive slow frames using diff on the boolean mask
@@ -507,7 +459,7 @@ def build_valid_mask(
     if conn is not None and segment_id is not None:
         ann_indices = _load_annotation_index(conn, segment_id)
         if len(ann_indices) > 0:
-            vel_smooth = _smooth(metrics["velocities"], hw)
+            vel_smooth = smooth_window(metrics["velocities"], hw)
             stopped = np.where(vel_smooth < cfg.stop_velocity_threshold)[0]
             if len(stopped) > 0:
                 # Bulk-load which annotated frames have justifications
@@ -593,11 +545,9 @@ def run_filters(
         ).fetchall()
         pose_cache: dict[int, np.ndarray] = {}
         for pr in pose_rows:
-            blob = pr["pose_data"]
-            if blob:
-                pose_cache[pr["segment_id"]] = np.frombuffer(
-                    blob, dtype=np.float64
-                ).reshape(-1, 7)
+            pose = load_pose_from_blob(pr["pose_data"])
+            if pose.shape[0] > 0:
+                pose_cache[pr["segment_id"]] = pose
 
         for row in chunk_rows:
             seg_id = row["segment_id"]
@@ -607,7 +557,7 @@ def run_filters(
             if pose is None or pose.shape[0] == 0:
                 pose_path = row["pose_path"]
                 if pose_path:
-                    pose = load_pose(pose_path)
+                    pose = load_pose_from_text(pose_path)
                 else:
                     pbar.update(1)
                     continue

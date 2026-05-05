@@ -26,6 +26,8 @@ from scipy.spatial.transform import Rotation as R
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
+from .poses import load_pose_from_blob, load_pose_from_text
+
 
 class FilteredFeatDataset(Dataset):
     """Feature dataset backed by a pre-built filtered lookup table.
@@ -114,22 +116,14 @@ class FilteredFeatDataset(Dataset):
                     "SELECT pose_data FROM segment_poses WHERE segment_id = ?",
                     (seg_id,),
                 ).fetchone()
-                if row is not None and row["pose_data"] is not None:
-                    full = np.frombuffer(
-                        row["pose_data"], dtype=np.float64
-                    ).reshape(-1, 7)
-                    pose = full[:: self.pose_step]
+                if row is not None:
+                    full = load_pose_from_blob(row["pose_data"])
+                    if full.shape[0] > 0:
+                        pose = full[:: self.pose_step]
 
             # Fall back to text file
             if pose is None and pp:
-                raw = np.loadtxt(pp)
-                if raw.ndim == 1:
-                    raw = raw.reshape(1, -1)
-                full = raw[:: self.pose_step, 1:] if raw.shape[1] == 8 else raw[:: self.pose_step]
-                nan_mask = np.isnan(full).any(axis=1)
-                if nan_mask.any():
-                    full = full[: np.argmax(nan_mask)]
-                pose = full
+                pose = load_pose_from_text(pp)[:: self.pose_step]
 
             self.poses.append(pose)
             ss = np.linalg.norm(np.diff(pose[:, [0, 2]], axis=0), axis=1).mean()

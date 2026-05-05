@@ -23,6 +23,7 @@ import numpy as np
 from tqdm import tqdm
 
 from .database import create_schema, get_connection
+from .poses import load_pose_from_text
 
 # Regex to split "VideoTitle_0003.txt" -> ("VideoTitle", "0003")
 _SEG_RE = re.compile(r"^(.+)_(\d{4})$")
@@ -33,24 +34,6 @@ def _parse_segment_name(stem: str) -> tuple[str, int] | None:
     if m is None:
         return None
     return m.group(1), int(m.group(2))
-
-
-def _load_and_parse_pose(pose_path: str) -> np.ndarray:
-    """Parse a pose text file into an (N, 7) float64 array.
-
-    Drops the frame-index column (column 0) and truncates at the first NaN.
-    Returns an empty (0, 7) array when the file has no valid rows.
-    """
-    raw = np.loadtxt(pose_path)
-    if raw.size == 0:
-        return np.empty((0, 7), dtype=np.float64)
-    if raw.ndim == 1:
-        raw = raw.reshape(1, -1)
-    pose = raw[:, 1:] if raw.shape[1] == 8 else raw
-    nan_mask = np.isnan(pose).any(axis=1)
-    if nan_mask.any():
-        pose = pose[: np.argmax(nan_mask)]
-    return pose.astype(np.float64)
 
 
 def _build_normalized_index(directory: str, extensions: tuple[str, ...]) -> dict[str, str]:
@@ -229,7 +212,7 @@ def ingest(
             norm_stem = stem.replace("'", "")
 
             # Parse pose file once — get both frame count and binary data
-            pose = _load_and_parse_pose(pose_path)
+            pose = load_pose_from_text(pose_path)
             num_frames = pose.shape[0]
             if num_frames == 0:
                 continue
