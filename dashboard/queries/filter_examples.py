@@ -8,13 +8,13 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-from dash_query import Query
-from dash_types import QueryOutput, FrameResult
+from ..query import Query
+from ..types import QueryOutput, FrameResult
 
 from curation.database import get_connection
 from curation.filters import FilterConfig
 
-from dash_queries.filter_diagnostic import _build_individual_masks
+from .filter_diagnostic import _build_individual_masks
 
 
 # The 10 curation filters. Names match `_build_individual_masks` keys

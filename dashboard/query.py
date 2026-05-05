@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from dash_types import QueryOutput
+from .types import QueryOutput
 
 
 class Query(ABC):

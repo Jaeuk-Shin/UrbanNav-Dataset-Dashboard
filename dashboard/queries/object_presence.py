@@ -2,9 +2,9 @@
 
 import streamlit as st
 
-from dash_query import Query
-from dash_types import QueryOutput, FrameResult
-from dash_loaders import load_json
+from ..query import Query
+from ..types import QueryOutput, FrameResult
+from ..loaders import load_json
 
 
 class ObjectPresenceQuery(Query):

@@ -81,7 +81,7 @@ browser:
 
 ```bash
 # On the remote machine
-streamlit run __main__.py --server.port 8501 --server.headless true \
+streamlit run dashboard.py --server.port 8501 --server.headless true \
     -- --data-root /path/to/dataset
 ```
 
@@ -103,19 +103,20 @@ offer a link to open it.
 
 ```
 annotate.py                         # annotation pipeline CLI entry point
-core/
+pipeline/
+    __init__.py
+    base.py                         # BaseStage abstract class, STAGES dict
     discovery.py                    # segment discovery with caching
     frames.py                       # FrameRef, SegmentReader, prefetch helpers
     parallel.py                     # multi-GPU parallel runner
-stages/
-    __init__.py                     # auto-discovery registry
-    base.py                         # BaseStage abstract class, STAGES dict
-    detect.py                       # YOLOv8 pedestrian detection
-    embed.py                        # SigLIP image embeddings
-    caption.py                      # Florence-2 captioning + tags
-    segment.py                      # Grounding DINO + SAM2 segmentation
-    crosswalk.py                    # Grounding DINO crosswalk detection
-    query.py                        # text-based image retrieval
+    retrieval.py                    # text-based image retrieval
+    stages/
+        __init__.py                 # auto-discovery registry
+        detect.py                   # YOLOv8 pedestrian detection
+        embed.py                    # SigLIP image embeddings
+        caption.py                  # Florence-2 captioning + tags
+        segment.py                  # Grounding DINO + SAM2 segmentation
+        crosswalk.py                # Grounding DINO crosswalk detection
 
 curation/
     __init__.py                     # package init
@@ -130,25 +131,35 @@ curation/
     datamodule.py                   # FilteredMixtureDataModule (Lightning)
 
 dashboard.py                        # dashboard entry point (streamlit run dashboard.py)
-app.py                              # Streamlit main()
-dash_types.py                       # result dataclasses
-dash_query.py                       # Query abstract base class
-dash_loaders.py                     # cached helpers: load_json, load_poses, list_segments
-dash_queries/
-    __init__.py                     # QUERIES registry (list)
-    overview.py                     # DatasetOverview
-    pedestrian.py                   # PedestrianCountQuery
-    object_presence.py              # ObjectPresenceQuery
-    ego_velocity.py                 # EgoVelocityQuery
-    caption_search.py               # CaptionSearchQuery
-dash_visualizers/
-    __init__.py                     # VISUALIZERS registry (dict)
-    _common.py                      # PALETTE, load_rgb()
-    image_grid.py                   # vis_image_grid
-    detection.py                    # vis_detection
-    mask.py                         # vis_mask
-    trajectory.py                   # vis_trajectory
-    table.py                        # vis_table
+dashboard/
+    __init__.py
+    app.py                          # Streamlit main()
+    types.py                        # result dataclasses
+    query.py                        # Query abstract base class
+    loaders.py                      # cached helpers: load_json, load_poses, list_segments
+    clip.py                         # clip + trajectory playback
+    queries/
+        __init__.py                 # QUERIES registry (list)
+        overview.py                 # DatasetOverview
+        pedestrian.py               # PedestrianCountQuery
+        object_presence.py          # ObjectPresenceQuery
+        ego_velocity.py             # EgoVelocityQuery
+        caption_search.py           # CaptionSearchQuery
+        crosswalk.py                # CrosswalkQuery
+        curation_overview.py        # CurationOverviewQuery
+        filter_diagnostic.py        # FilterDiagnosticQuery
+        filter_examples.py          # FilterExamplesQuery
+        filtered_browse.py          # FilteredBrowseQuery
+    visualizers/
+        __init__.py                 # VISUALIZERS registry (dict)
+        _common.py                  # PALETTE, load_rgb()
+        image_grid.py               # vis_image_grid
+        detection.py                # vis_detection
+        mask.py                     # vis_mask
+        trajectory.py               # vis_trajectory
+        table.py                    # vis_table
+        filter_summary.py           # vis_filter_summary
+        filter_timeline.py          # vis_filter_timeline
 ```
 
 ## Annotation pipeline
@@ -181,7 +192,7 @@ class MyStage(BaseStage):
 
 The `BaseStage.run()` template handles discovery, prefetching, progress bars,
 and skip logic.  Multi-GPU parallelism splits segments across GPUs via
-`core/parallel.py`.
+`pipeline/parallel.py`.
 
 ## Curation pipeline
 

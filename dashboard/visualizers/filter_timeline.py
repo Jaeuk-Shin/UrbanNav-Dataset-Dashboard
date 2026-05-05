@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-from dash_types import QueryOutput
+from ..types import QueryOutput
 
 # (subplot_title, metric_key, mask_key, threshold_key)
 _PANELS = [

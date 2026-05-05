@@ -5,10 +5,10 @@ from pathlib import Path
 
 import streamlit as st
 
-from dash_loaders import list_segments, load_segment_cache
-from dash_queries import QUERIES
-from dash_visualizers import VISUALIZERS
-from dash_visualizers.table import vis_table
+from dashboard.loaders import list_segments, load_segment_cache
+from dashboard.queries import QUERIES
+from dashboard.visualizers import VISUALIZERS
+from dashboard.visualizers.table import vis_table
 
 
 def main(data_root: str | None = None):
@@ -34,7 +34,7 @@ def main(data_root: str | None = None):
                                     key="_db_path")
     if db_path and not Path(db_path).exists():
         st.sidebar.caption("DB not found — curation queries will be unavailable")
-    # Make the DB path available to dash_clip (for trajectory rendering)
+    # Make the DB path available to dashboard.clip (for trajectory rendering)
     # without threading it through every visualizer signature.
     st.session_state["_clip_db_path"] = db_path
 

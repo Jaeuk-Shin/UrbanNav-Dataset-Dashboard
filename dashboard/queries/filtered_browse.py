@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-from dash_query import Query
-from dash_types import QueryOutput, FrameResult
+from ..query import Query
+from ..types import QueryOutput, FrameResult
 
 from curation.database import get_connection
 

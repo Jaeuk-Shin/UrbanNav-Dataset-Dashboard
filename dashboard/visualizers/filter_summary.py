@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from dash_types import QueryOutput
+from ..types import QueryOutput
 
 
 def vis_filter_summary(output: QueryOutput, root: Path, max_n: int):

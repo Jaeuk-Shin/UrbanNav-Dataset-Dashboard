@@ -4,9 +4,9 @@ from pathlib import Path
 
 import streamlit as st
 
-from dash_clip import play_button, show_selected_clip
-from dash_types import QueryOutput
-from dash_visualizers._common import load_rgb
+from ..clip import play_button, show_selected_clip
+from ..types import QueryOutput
+from ._common import load_rgb
 
 
 def vis_image_grid(output: QueryOutput, root: Path, max_n: int):

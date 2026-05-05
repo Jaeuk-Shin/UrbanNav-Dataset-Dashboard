@@ -3,9 +3,9 @@
 import cv2
 import numpy as np
 
-from dash_query import Query
-from dash_types import QueryOutput, SegmentResult
-from dash_loaders import load_json, load_poses, segment_frame_count, DATASET_FPS
+from ..query import Query
+from ..types import QueryOutput, SegmentResult
+from ..loaders import load_json, load_poses, segment_frame_count, DATASET_FPS
 
 
 class DatasetOverview(Query):

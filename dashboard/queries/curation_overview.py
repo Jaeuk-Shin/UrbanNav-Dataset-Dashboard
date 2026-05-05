@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-from dash_query import Query
-from dash_types import QueryOutput, SegmentResult
+from ..query import Query
+from ..types import QueryOutput, SegmentResult
 
 # Reuse curation internals for filter re-decomposition
 from curation.database import get_connection

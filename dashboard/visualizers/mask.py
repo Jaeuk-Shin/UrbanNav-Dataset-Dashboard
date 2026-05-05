@@ -6,9 +6,9 @@ import cv2
 import numpy as np
 import streamlit as st
 
-from dash_clip import play_button, show_selected_clip
-from dash_types import QueryOutput
-from dash_visualizers._common import PALETTE, load_rgb
+from ..clip import play_button, show_selected_clip
+from ..types import QueryOutput
+from ._common import PALETTE, load_rgb
 
 
 def vis_mask(output: QueryOutput, root: Path, max_n: int):
