@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from stages.base import BaseStage
+from pipeline.base import BaseStage
 
 DEFAULT_CATEGORIES = (
     "person . car . truck . bus . van . motorcycle . bicycle . scooter . "

@@ -6,7 +6,7 @@ files (rgb/{segment}.mp4).  Use --input-format to select the layout
 ('jpg' default, or 'video').  For video mode, --fps controls the
 subsampling rate (default 1.0 fps).
 
-Subcommands (auto-discovered from stages/):
+Subcommands (auto-discovered from pipeline/stages/):
     embed       SigLIP embeddings for text-based image retrieval
     detect      YOLOv8 pedestrian detection and counting
     caption     Florence-2 detailed captioning + object-detection tags
@@ -24,8 +24,8 @@ Video dataset example:
 import argparse
 
 from pipeline.parallel import run_parallel
-from stages import STAGES
-from stages.query import run_query
+from pipeline.stages import STAGES
+from pipeline.retrieval import run_query
 
 
 # Ordered list of stages for the "all" command

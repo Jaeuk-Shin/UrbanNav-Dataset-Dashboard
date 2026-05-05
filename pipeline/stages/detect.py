@@ -2,7 +2,7 @@
 
 import json
 
-from stages.base import BaseStage
+from pipeline.base import BaseStage
 
 
 class DetectStage(BaseStage):

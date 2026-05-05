@@ -4,7 +4,7 @@ import argparse
 
 
 def _worker(stage_name, args_dict, gpu_id, seg_names):
-    from stages import STAGES
+    from pipeline.stages import STAGES
     args = argparse.Namespace(**args_dict)
     args.device = f"cuda:{gpu_id}"
     args._segment_names = seg_names
@@ -17,7 +17,7 @@ def run_parallel(stage_name, args):
     num_gpus = getattr(args, "num_gpus", 1) or 1
 
     if num_gpus <= 1:
-        from stages import STAGES
+        from pipeline.stages import STAGES
         stage = STAGES[stage_name]()
         stage.run(args)
         return

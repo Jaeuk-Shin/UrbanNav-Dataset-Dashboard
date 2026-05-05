@@ -5,7 +5,7 @@ import json
 import torch
 from tqdm import tqdm
 
-from stages.base import BaseStage
+from pipeline.base import BaseStage
 
 DEFAULT_PROMPT = "crosswalk."
 

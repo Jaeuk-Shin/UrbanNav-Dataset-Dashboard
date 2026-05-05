@@ -4,7 +4,7 @@ import json
 
 import torch
 
-from stages.base import BaseStage
+from pipeline.base import BaseStage
 
 
 def _florence(model, processor, image, task, device, dtype=torch.float16, image_size=None):
